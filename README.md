@@ -38,7 +38,9 @@ def play_game():
         _, winner, done, board = logic.fast_step(board, action, player)
 ```
 
-*Gumbel MCTS makes much better use of the simulation budget. With 8 sims on Gomoku, Gumbel finds the strategic moves while PUCT concentrates its visit counts at the wrong place.*
+## Illustration
+
+Gumbel MCTS makes much better use of its simulation budget. With 8 sims on Gomoku, Gumbel finds the strategic moves while PUCT concentrates its visit counts at the wrong place.
 
 <p align="center">
   <img src="examples/gomoku_heatmap_9x9.png" width="700" alt="Gomoku Heatmap 9x9 — PUCT vs Gumbel Dense" />
