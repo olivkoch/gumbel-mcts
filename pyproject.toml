@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gumbel-mcts"
+version = "0.1.0"
+description = "A lightweight, standalone, and modular Gumbel MCTS implementation"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    {name = "Olivier Koch", email = "olivier.koch@gmail.com"},
+]
+dependencies = [
+    "numpy",
+    "torch",
+    "numba",
+    "matplotlib>=3.10.8",
+    "pillow>=12.1.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
