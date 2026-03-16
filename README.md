@@ -18,7 +18,8 @@ See [gumbel-mcts-benchmark](https://github.com/olivkoch/gumbel-mcts-benchmark) f
 
 ## Usage
 
-```
+```python
+
 def play_game():
     logic = TicTacToeLogic()
     model = TinyModel()
@@ -37,15 +38,8 @@ def play_game():
         _, winner, done, board = logic.fast_step(board, action, player)
 ```
 
-### Which one should I use?
+*Gumbel MCTS makes much better use of the simulation budget. With 8 sims on Gomoku, Gumbel finds the strategic moves while PUCT concentrates its visit counts at the wrong place.*
 
-| Scenario | Variant |
-|---|---|
-| Weak / random policy, need broad exploration | **PUCT** |
-| Small action space + trained policy | **GumbelDense** |
-| Large action space (chess, Go) or memory-constrained | **GumbelSparse** |
-| Need improved policy $\pi'$ as training target | **GumbelDense** or **GumbelSparse** |
-| Not sure | **GumbelSparse** (drop-in replacement for GumbelDense, works everywhere) |
-
-![Gomoku Heatmap 9x9](gomoku_heatmap_9x9.png)
-
+<p align="center">
+  <img src="examples/gomoku_heatmap_9x9.png" width="700" alt="Gomoku Heatmap 9x9 — PUCT vs Gumbel Dense" />
+</p>
