@@ -1,6 +1,11 @@
 # gumbel-mcts
 
-A lightweight and modular Gumbel MCTS implementation
+A lightweight and modular Gumbel MCTS implementation. 
+
+Optimized for speed! Generates hundreds of thousands of sims / sec. :rocket:
+
+See [gumbel-mcts-benchmark](https://github.com/olivkoch/gumbel-mcts-benchmark) for full benchmark.
+
 
 ## Description
 
@@ -13,8 +18,6 @@ We provide three MCTS implementations:
 - `gumbel_dense.py`: an implementation of [Policy improvement by planning with Gumbel](https://openreview.net/forum?id=bERaNdoegnO), offering up to 200X improvement in win rate / simulation budget over PUCT.
 
 - `gumbel_sparse.py`: a sparse implementation of Gumbel MCTS, particularly useful for games with large action spaces (e.g. chess)
-
-See [gumbel-mcts-benchmark](https://github.com/olivkoch/gumbel-mcts-benchmark) for all benchmarks.
 
 ## Usage
 
