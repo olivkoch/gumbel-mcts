@@ -1,6 +1,6 @@
 # gumbel-mcts
 
-A lightweight and modular Gumbel MCTS implementation. 
+A lightweight and numba-accelerated Gumbel MCTS implementation. 
 
 Optimized for speed! Generates hundreds of thousands of sims / sec. :rocket:
 
