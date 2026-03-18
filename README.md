@@ -6,16 +6,20 @@ Optimized for speed! Generates hundreds of thousands of sims / sec. :rocket:
 
 See [gumbel-mcts-benchmark](https://github.com/olivkoch/gumbel-mcts-benchmark) for full benchmark.
 
+<p align="center">
+  <img src="img/gumbel.png" width="700" alt="Gumbel principle" />
+  <small><i>Source:https://medium.com/correll-lab/planning-with-gumbel-036018b180bf</i></small>
+</p>
 
 ## Description
 
-Most open-source MCTS implementations provide only standard PUCT (AlphaZero-style) or dense Gumbel MCTS (MuZero, EfficientZero). Sparse Gumbel MCTS — which makes Gumbel planning practical for large action spaces like chess (4672 actions) or Go (362) — is essentially absent.
+Gumbel sampling brought tremendous progress to MCTS, but efficient standalone implementation of Gumbel MCTS are missing.
 
 We provide three MCTS implementations:
 
-- `puct.py`: an efficient implementation of PUCT MCTS. It produces the exact same output as a reference [mcts_v2.py](https://github.com/michaelnny/alpha_zero/blob/main/alpha_zero/core/mcts_v2.py) but with 2-20X speedup. 
+- `puct.py`: an efficient implementation of PUCT MCTS. It produces the exact same output as a reference [mcts_v2.py](https://github.com/michaelnny/alpha_zero/blob/main/alpha_zero/core/mcts_v2.py) but but with a **2-20X speedup**. 
 
-- `gumbel_dense.py`: an implementation of [Policy improvement by planning with Gumbel](https://openreview.net/forum?id=bERaNdoegnO), offering up to 200X improvement in win rate / simulation budget over PUCT.
+- `gumbel_dense.py`: an implementation of [Policy improvement by planning with Gumbel](https://openreview.net/forum?id=bERaNdoegnO), offering **massive performance improvement when the simulation budget is low**
 
 - `gumbel_sparse.py`: a sparse implementation of Gumbel MCTS, particularly useful for games with large action spaces (e.g. chess)
 
@@ -46,5 +50,5 @@ def play_game():
 Gumbel MCTS makes much better use of its simulation budget. With 8 sims on Gomoku, Gumbel finds the strategic moves while PUCT concentrates its visit counts at the wrong place.
 
 <p align="center">
-  <img src="examples/gomoku_heatmap_9x9.png" width="700" alt="Gomoku Heatmap 9x9 — PUCT vs Gumbel Dense" />
+  <img src="img/gomoku_heatmap_9x9.png" width="700" alt="Gomoku Heatmap 9x9 — PUCT vs Gumbel Dense" />
 </p>
