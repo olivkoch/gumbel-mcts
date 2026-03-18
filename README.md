@@ -4,10 +4,8 @@ A lightweight and numba-accelerated Gumbel MCTS implementation.
 
 Optimized for speed! Generates hundreds of thousands of sims / sec. :rocket:
 
-See [gumbel-mcts-benchmark](https://github.com/olivkoch/gumbel-mcts-benchmark) for full benchmark.
-
 <p align="center">
-  <img src="img/gumbel.png" width="700" alt="Gumbel principle" /><br>
+  <img src="img/gumbel.png" width="100%" alt="Gumbel principle" /><br>
   <small><i><a href="https://medium.com/correll-lab/planning-with-gumbel-036018b180bf">Improving MuZero using the Gumbel top-k trick</a>, by Xavier O'Keefe</i></small>
 </p>
 
@@ -17,13 +15,15 @@ Gumbel sampling brought tremendous progress to MCTS, but efficient standalone im
 
 We provide three MCTS implementations:
 
-- `puct.py`: an efficient implementation of PUCT MCTS. It produces the exact same output as a reference [mcts_v2.py](https://github.com/michaelnny/alpha_zero/blob/main/alpha_zero/core/mcts_v2.py) but but with a **2-20X speedup**. 
+- `puct.py`: an efficient implementation of PUCT MCTS. It produces the exact same output as a reference [mcts_v2.py](https://github.com/michaelnny/alpha_zero/blob/main/alpha_zero/core/mcts_v2.py) but but with a **2-20X speedup** on both Mac and NVIDIA GPUs. 
 
-- `gumbel_dense.py`: an implementation of [Policy improvement by planning with Gumbel](https://openreview.net/forum?id=bERaNdoegnO), offering **massive performance improvement when the simulation budget is low**
+- `gumbel_dense.py`: an implementation of [Policy improvement by planning with Gumbel](https://openreview.net/forum?id=bERaNdoegnO), offering **massive learning efficiency when the simulation budget is low**
 
 - `gumbel_sparse.py`: a sparse implementation of Gumbel MCTS, particularly useful for games with large action spaces (e.g. chess)
 
-Our Gumbel implementation offers both simulation efficiency and numba-accelerated speedup.
+Our Gumbel implementation offers **both simulation efficiency and speed**.
+
+See [gumbel-mcts-benchmark](https://github.com/olivkoch/gumbel-mcts-benchmark) for full benchmark.
 
 ## Usage
 
