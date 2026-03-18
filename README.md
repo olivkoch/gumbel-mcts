@@ -23,7 +23,7 @@ We provide three MCTS implementations:
 
 Our Gumbel implementation offers **both simulation efficiency and speed**.
 
-See [gumbel-mcts-benchmark](https://github.com/olivkoch/gumbel-mcts-benchmark) for full benchmark.
+See [gumbel-mcts-benchmark](https://github.com/olivkoch/gumbel-mcts-benchmark) for full benchmark and validation against a gold standard MCTS.
 
 ## Usage
 
@@ -49,8 +49,20 @@ def play_game():
 
 ## Illustration
 
+With a random model, Gumbel wins with low-budget but PUCT catches up. As soon as the model gets better than random, Gumbel wins.
+
+<p align="center">
+  <img src="img/puct_vs_gumbel_winrate_random.png" width="100%" alt="PUCT vs Gumbel" />
+</p>
+<p align="center">
+  <img src="img/puct_vs_gumbel_winrate_heuristic.png" width="100%" alt="PUCT vs Gumbel" />
+</p>
+<p align="center">
+  <img src="img/puct_vs_gumbel_winrate_strong.png" width="100%" alt="PUCT vs Gumbel" />
+</p>
+
 Gumbel MCTS makes much better use of its simulation budget. With 8 sims on Gomoku, Gumbel finds the strategic moves while PUCT concentrates its visit counts at the wrong place.
 
 <p align="center">
-  <img src="img/gomoku_heatmap_9x9.png" width="700" alt="Gomoku Heatmap 9x9 — PUCT vs Gumbel Dense" />
+  <img src="img/gomoku_heatmap_9x9.png" width="100%" alt="Gomoku Heatmap 9x9 — PUCT vs Gumbel Dense" />
 </p>
