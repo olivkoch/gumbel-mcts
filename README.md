@@ -7,7 +7,7 @@ Optimized for speed! Generates hundreds of thousands of sims / sec. :rocket:
 See [gumbel-mcts-benchmark](https://github.com/olivkoch/gumbel-mcts-benchmark) for full benchmark.
 
 <p align="center">
-  <img src="img/gumbel.png" width="700" alt="Gumbel principle" />
+  <img src="img/gumbel.png" width="700" alt="Gumbel principle" /><br>
   <small><i>Source:https://medium.com/correll-lab/planning-with-gumbel-036018b180bf</i></small>
 </p>
 
