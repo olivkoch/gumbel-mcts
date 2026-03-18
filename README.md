@@ -8,7 +8,7 @@ See [gumbel-mcts-benchmark](https://github.com/olivkoch/gumbel-mcts-benchmark) f
 
 <p align="center">
   <img src="img/gumbel.png" width="700" alt="Gumbel principle" /><br>
-  <small><i>Source:https://medium.com/correll-lab/planning-with-gumbel-036018b180bf</i></small>
+  <small><i><a href="https://medium.com/correll-lab/planning-with-gumbel-036018b180bf">Improving MuZero using the Gumbel top-k trick</a>, by Xavier O'Keefe</i></small>
 </p>
 
 ## Description
