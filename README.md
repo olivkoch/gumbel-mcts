@@ -23,6 +23,8 @@ We provide three MCTS implementations:
 
 - `gumbel_sparse.py`: a sparse implementation of Gumbel MCTS, particularly useful for games with large action spaces (e.g. chess)
 
+Our Gumbel implementation offers both simulation efficiency and numba-accelerated speedup.
+
 ## Usage
 
 ```python
