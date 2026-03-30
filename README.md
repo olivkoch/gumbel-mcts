@@ -12,7 +12,7 @@ A lightweight and numba-accelerated Gumbel MCTS implementation.
 Optimized for speed! Generates hundreds of thousands of sims / sec. :rocket:
 
 <p align="center">
-  <img src="img/gumbel.png" width="100%" alt="Gumbel principle" /><br>
+  <img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/img/gumbel.png" width="100%" alt="Gumbel principle" /><br>
   <small><i><a href="https://medium.com/correll-lab/planning-with-gumbel-036018b180bf">Improving MuZero using the Gumbel top-k trick</a>, by Xavier O'Keefe</i></small>
 </p>
 
@@ -59,17 +59,17 @@ def play_game():
 With a random model, Gumbel wins with low-budget but PUCT catches up. As soon as the model gets better than random, Gumbel wins.
 
 <p align="center">
-  <img src="img/puct_vs_gumbel_winrate_random.png" width="100%" alt="PUCT vs Gumbel" />
+  <img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/img/puct_vs_gumbel_winrate_random.png" width="100%" alt="PUCT vs Gumbel" />
 </p>
 <p align="center">
-  <img src="img/puct_vs_gumbel_winrate_heuristic.png" width="100%" alt="PUCT vs Gumbel" />
+  <img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/img/puct_vs_gumbel_winrate_heuristic.png" width="100%" alt="PUCT vs Gumbel" />
 </p>
 <p align="center">
-  <img src="img/puct_vs_gumbel_winrate_strong.png" width="100%" alt="PUCT vs Gumbel" />
+  <img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/img/puct_vs_gumbel_winrate_strong.png" width="100%" alt="PUCT vs Gumbel" />
 </p>
 
 Gumbel MCTS makes much better use of its simulation budget. With 8 sims on Gomoku, Gumbel finds the strategic moves while PUCT concentrates its visit counts at the wrong place.
 
 <p align="center">
-  <img src="img/gomoku_heatmap_9x9.png" width="100%" alt="Gomoku Heatmap 9x9 — PUCT vs Gumbel Dense" />
+  <img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/img/gomoku_heatmap_9x9.png" width="100%" alt="Gomoku Heatmap 9x9 — PUCT vs Gumbel Dense" />
 </p>
