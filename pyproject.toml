@@ -19,5 +19,14 @@ dependencies = [
     "pillow>=12.1.1",
 ]
 
+[project.optional-dependencies]
+test = ["pytest", "pytest-cov"]
+
+[project.urls]
+Homepage = "https://github.com/olivkoch/gumbel-mcts"
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
