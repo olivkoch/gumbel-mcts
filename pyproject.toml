@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gumbel-mcts"
-version = "0.1.0"
+version = "0.1.1"
+readme = "README.md"
 description = "A lightweight, standalone, and modular Gumbel MCTS implementation"
 license = "MIT"
 requires-python = ">=3.10"

@@ -1,3 +1,10 @@
+[![PyPI version](https://badge.fury.io/py/gumbel-mcts.svg)](https://pypi.org/project/gumbel-mcts/)
+[![Tests](https://github.com/olivkoch/gumbel-mcts/actions/workflows/tests.yml/badge.svg)](https://github.com/olivkoch/gumbel-mcts/actions)
+[![codecov](https://codecov.io/gh/olivkoch/gumbel-mcts/branch/main/graph/badge.svg)](https://codecov.io/gh/olivkoch/gumbel-mcts)
+[![docs](https://readthedocs.org/projects/gumbel-mcts/badge/?version=latest)](https://gumbel-mcts.readthedocs.io)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/gumbel-mcts)](https://pypi.org/project/gumbel-mcts/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+
 # gumbel-mcts
 
 A lightweight and numba-accelerated Gumbel MCTS implementation. 
