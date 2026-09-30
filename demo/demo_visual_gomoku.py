@@ -7,9 +7,9 @@ budget.  Gumbel concentrates visits on the best candidates via sequential
 halving, while PUCT spreads visits broadly.
 
 Usage:
-    uv run python examples/demo_visual_gomoku.py                              # default (64 sims, random model)
-    uv run python examples/demo_visual_gomoku.py --sims 8                     # fewer sims
-    uv run python examples/demo_visual_gomoku.py --model heuristic --sims 32  # noisy heuristic model
+    uv run python demo/demo_visual_gomoku.py                              # default (64 sims, random model)
+    uv run python demo/demo_visual_gomoku.py --sims 8                     # fewer sims
+    uv run python demo/demo_visual_gomoku.py --model heuristic --sims 32  # noisy heuristic model
 """
 
 import argparse
@@ -473,7 +473,7 @@ def generate_heatmap_9x9(num_sims=512, seed=42, out_path=None,
 
 
 
-    out = out_path or "examples/gomoku_heatmap_9x9.png"
+    out = out_path or "demo/gomoku_heatmap_9x9.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"\nSaved heatmap → {out}")
@@ -491,7 +491,7 @@ def main():
                         choices=["random", "heuristic"],
                         help="Model type (default: heuristic)")
     parser.add_argument("--out", type=str, default=None,
-                        help="Output file path (default: examples/gomoku_heatmap_9x9.png)")
+                        help="Output file path (default: demo/gomoku_heatmap_9x9.png)")
     args = parser.parse_args()
 
     print(f"Generating 9×9 heatmap ({args.sims} sims, model={args.model}, "

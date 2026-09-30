@@ -7,18 +7,26 @@ from kernels.gumbel_dense_kernels import descend_tree_kernel, get_forced_root_mo
 class GumbelDense(PUCT):
     """Gumbel MCTS implementation."""
     
-    def __init__(self, n_games, max_nodes, logic, device='cuda', c_visit=50.0, c_scale=1.0):
+    def __init__(self, n_games, max_nodes, logic, device='cuda', c_visit=50.0, c_scale=1.0,
+                 max_considered_actions=16, entropy_min_k=4):
         super().__init__(n_games, max_nodes, logic, device)
         # We need to store the Gumbel noise for the duration of the search
         self.gumbel_noises = np.zeros((n_games, self.storage.num_actions), dtype=np.float32)
         # Store raw logits for the Muzero formula
         self.root_logits = np.zeros((n_games, self.storage.num_actions), dtype=np.float32)
         self.root_legal_masks = np.zeros((n_games, self.storage.num_actions), dtype=np.bool_)
-    
+
         self.root_nn_values = np.zeros(n_games, dtype=np.float32)
-        
+
         self.c_visit = c_visit
         self.c_scale = c_scale
+        self.max_considered_actions = max_considered_actions
+        # Entropy scheduler: dynamic max_k ∈ [entropy_min_k, max_considered_actions]
+        # entropy_min_k is used when the model is random (high entropy);
+        # max_considered_actions is used when the model is fully confident (low entropy).
+        self.entropy_min_k      = max(2, min(entropy_min_k, max_considered_actions))
+        self.last_root_entropy  = None   # Shannon entropy of root priors (nats), set per search
+        self.last_dynamic_max_k = None   # max_k chosen by entropy scheduler, set per search
 
     def initialize_roots(self, active_games, starting_boards, starting_players):
         super().initialize_roots(active_games, starting_boards, starting_players)
@@ -38,10 +46,30 @@ class GumbelDense(PUCT):
         # Ensure your model has a way to return raw scores or apply np.log(probs)
         self._expand_roots_v4(model, active_games)
 
-        # 2. SETUP SEQUENTIAL HALVING
-        # k_initial = min(self.storage.num_actions, 16)
-        # num_phases = max(1, int(np.log2(k_initial)))
-        max_k = min(self.storage.num_actions, 16)
+        # 2. STATE-ENTROPY DYNAMIC MAX_K SCHEDULER
+        # Normalise root priors over legal actions and compute Shannon entropy.
+        # High entropy (≈ log(NA), random model) → small max_k (dense sims per candidate).
+        # Low entropy (confident model) → large max_k (rich improved-policy distribution).
+        root_idxs   = self.storage.root_indices[game_indices]
+        raw_probs   = self.storage.prior_probs[root_idxs].astype(np.float64)   # (n, A)
+        legal_f     = self.root_legal_masks[:n_active].astype(np.float64)
+        legal_probs = raw_probs * legal_f
+        legal_probs /= legal_probs.sum(axis=1, keepdims=True).clip(min=1e-8)
+        mean_ent    = float(-(legal_probs * np.log(legal_probs + 1e-10)).sum(axis=1).mean())
+        mean_n_legal = float(legal_f.sum(axis=1).mean())
+        max_ent      = np.log(mean_n_legal) if mean_n_legal > 1.0 else 1.0
+        # ratio=1.0 → fully random, ratio=0.0 → fully certain
+        ratio        = min(1.0, mean_ent / max(float(max_ent), 1e-8))
+        dynamic_max_k = int(round(
+            self.max_considered_actions
+            - ratio * (self.max_considered_actions - self.entropy_min_k)
+        ))
+        dynamic_max_k = max(self.entropy_min_k, min(self.max_considered_actions, dynamic_max_k))
+        self.last_root_entropy  = mean_ent
+        self.last_dynamic_max_k = dynamic_max_k
+
+        # 3. SETUP SEQUENTIAL HALVING (use dynamic_max_k from entropy scheduler)
+        max_k = min(self.storage.num_actions, dynamic_max_k)
         num_phases = max(1, int(np.log2(max_k)))
 
         # Ensure first phase gives ≥ 2 sims per candidate
@@ -50,6 +78,13 @@ class GumbelDense(PUCT):
         k_initial = max(2, k_initial)  # need at least 2 to halve
 
         # Recompute phases for actual k
+        num_phases = max(1, int(np.log2(k_initial)))
+
+        # Guardrail: ensure phase 0 has >= 4 sims/candidate.
+        # Phase 0 budget = sims // num_phases, so enforce k_initial <= that // 4.
+        # Round down to nearest power of 2 to keep halving clean.
+        k_initial = min(k_initial, max(2, (num_simulations // num_phases) // 4))
+        k_initial = max(2, 1 << int(np.log2(k_initial)))
         num_phases = max(1, int(np.log2(k_initial)))
 
         # Initialize Candidate Mask (all legal moves are candidates)

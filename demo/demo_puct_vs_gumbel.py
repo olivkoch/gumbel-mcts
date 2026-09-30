@@ -6,9 +6,9 @@ Plays full games where PUCT controls one side and Gumbel Dense the other
 (2) upward and plots PUCT win-rate vs budget.
 
 Usage:
-    uv run python examples/demo_puct_vs_gumbel.py                       # defaults
-    uv run python examples/demo_puct_vs_gumbel.py --games 40 --seed 0   # more games
-    uv run python examples/demo_puct_vs_gumbel.py --out winrate.png     # custom output
+    uv run python demo/demo_puct_vs_gumbel.py                       # defaults
+    uv run python demo/demo_puct_vs_gumbel.py --games 40 --seed 0   # more games
+    uv run python demo/demo_puct_vs_gumbel.py --out winrate.png     # custom output
 """
 
 import argparse
@@ -326,7 +326,7 @@ def main():
         model_label = "Random Model"
         model = RandomModel()
 
-    out_path = args.out or f"examples/puct_vs_gumbel_winrate_{args.model}.png"
+    out_path = args.out or f"demo/puct_vs_gumbel_winrate_{args.model}.png"
 
     print(f"PUCT vs Gumbel Dense — 15×15 Gomoku, {model_label}")
     print(f"Budgets: {budgets}")
