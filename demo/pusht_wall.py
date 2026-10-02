@@ -161,12 +161,22 @@ class WallGapEnv:
             return self.fraction_past_wall()
 
         approach, push_end = self._macro_targets()
+        half = self.gap_size / 2
+        wall_left = WALL_X - 15   # wall box left edge
+        agent_r = 15.0
         step_count = 0
         for target, n in [(approach[action], N_APPROACH),
                           (push_end[action], N_PUSH),
                           (push_end[action], N_SETTLE)]:
             for si in range(n):
                 self.env.step(target.astype(np.float32))
+                # Enforce wall collision for the kinematic agent
+                ax, ay = raw.agent.position
+                if ax + agent_r > wall_left:
+                    in_gap = (GAP_CENTER_Y - half) < ay < (GAP_CENTER_Y + half)
+                    if not in_gap:
+                        raw.agent.position = (wall_left - agent_r, ay)
+                        raw.agent.velocity = (0, raw.agent.velocity[1])
                 step_count += 1
                 if self.record and step_count % 3 == 0:
                     self.frames.append(self.env.render())
