@@ -62,28 +62,40 @@ class WallGapEnv:
         self.env = _env.env if isinstance(_env, gym.wrappers.TimeLimit) else _env
         self._rng = np.random.default_rng(seed)
         self.frames = []
-        self._walls = []
+        self._wall_bodies = []
 
     def _add_walls(self):
         space = self.env.unwrapped.block._space
         half = self.gap_size / 2
-        segs = [
-            pymunk.Segment(space.static_body,
-                           (WALL_X, GAP_CENTER_Y + half), (WALL_X, 512), WALL_THICK),
-            pymunk.Segment(space.static_body,
-                           (WALL_X, 0), (WALL_X, GAP_CENTER_Y - half), WALL_THICK),
-        ]
-        for s in segs:
-            s.friction = 1.0
-            s.elasticity = 0.0
-        space.add(*segs)
-        self._walls = segs
-        # Smaller timestep to prevent tunneling through thin walls
-        self.env.unwrapped.dt = 0.005
+        wall_width = 30  # thick enough to prevent tunneling
+
+        # Top wall: solid box from gap top edge to ceiling
+        top_h = 512 - (GAP_CENTER_Y + half)
+        if top_h > 0:
+            top_body = pymunk.Body(body_type=pymunk.Body.STATIC)
+            top_body.position = (WALL_X, GAP_CENTER_Y + half + top_h / 2)
+            top_box = pymunk.Poly.create_box(top_body, size=(wall_width, top_h))
+            top_box.friction = 1.0
+            top_box.elasticity = 0.0
+            space.add(top_body, top_box)
+            self._wall_bodies.append(top_body)
+
+        # Bottom wall: solid box from floor to gap bottom edge
+        bot_h = GAP_CENTER_Y - half
+        if bot_h > 0:
+            bot_body = pymunk.Body(body_type=pymunk.Body.STATIC)
+            bot_body.position = (WALL_X, bot_h / 2)
+            bot_box = pymunk.Poly.create_box(bot_body, size=(wall_width, bot_h))
+            bot_box.friction = 1.0
+            bot_box.elasticity = 0.0
+            space.add(bot_body, bot_box)
+            self._wall_bodies.append(bot_body)
 
     def reset(self):
         self.env.reset(seed=self.seed)
         raw = self.env.unwrapped
+        # Hide the goal overlay (not used in wall-gap task)
+        raw.goal_pose = np.array([-1000.0, -1000.0, 0.0])
         # Place block on the left side, bar facing the wall (needs rotation).
         # Angle must be set BEFORE position (COG offset issue in pymunk).
         raw.block.angle = 0.0   # bar horizontal, stem up — widest face toward wall
@@ -91,7 +103,12 @@ class WallGapEnv:
         raw.block.velocity = (0, 0)
         raw.block.angular_velocity = 0
         raw.agent.position = (80, 256)
+        self._wall_bodies = []
         self._add_walls()
+        # Step physics once to sync pymunk state with renderer
+        raw.block._space.step(0.001)
+        raw.block.velocity = (0, 0)
+        raw.block.angular_velocity = 0
         self.frames.clear()
         if self.record:
             self.frames.append(self.env.render())
@@ -144,14 +161,16 @@ class WallGapEnv:
             return self.fraction_past_wall()
 
         approach, push_end = self._macro_targets()
+        step_count = 0
         for target, n in [(approach[action], N_APPROACH),
                           (push_end[action], N_PUSH),
                           (push_end[action], N_SETTLE)]:
             for si in range(n):
                 self.env.step(target.astype(np.float32))
+                step_count += 1
+                if self.record and step_count % 3 == 0:
+                    self.frames.append(self.env.render())
 
-        if self.record:
-            self.frames.append(self.env.render())
         return self.fraction_past_wall()
 
 
@@ -173,22 +192,23 @@ def run_episode(env, strategy, n_macros, budget):
             scores = np.zeros(NUM_PUSH_DIRS + 1)
             counts = np.zeros(NUM_PUSH_DIRS + 1)
 
+            # Disable recording during planning simulations
+            was_recording = env.record
+            env.record = False
             for _ in range(budget):
                 if strategy == "puct":
-                    # UCB selection
                     N_total = max(1, counts.sum())
                     ucb = scores / counts.clip(min=1) + 1.5 * np.sqrt(np.log(N_total) / counts.clip(min=1))
                     ucb[counts == 0] = 1e9
                     a = int(np.argmax(ucb))
                 elif strategy == "gumbel":
-                    # Gumbel sequential halving (inline, simple version)
                     a = _gumbel_select(scores, counts, budget, NUM_PUSH_DIRS + 1)
 
-                # Simulate action
                 _restore(env, root_state)
                 frac = env.step(a)
                 counts[a] += 1
                 scores[a] += frac
+            env.record = was_recording
 
             if strategy == "puct":
                 action = int(np.argmax(counts))
