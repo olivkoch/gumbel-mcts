@@ -349,11 +349,18 @@ def _find_contrasting_seed(logic, model, budget, base_seed, max_tries=50,
     return pt, gt, False, ok_g
 
 
-def make_animation(logic, model, budget, seed, out_path):
-    print(f"  searching for a contrasting episode pair (budget={budget})...")
-    puct_traj, gumbel_traj, ok_p, ok_g = _find_contrasting_seed(
-        logic, model, budget, seed
-    )
+def make_animation(logic, model, budget, seed, out_path, *, fair=False):
+    if fair:
+        print(f"  running fixed-seed episode pair (budget={budget}, seed={seed})...")
+        np.random.seed(seed);     torch.manual_seed(seed)
+        ok_p, puct_traj = run_episode("puct", budget, logic, model)
+        np.random.seed(seed + 1); torch.manual_seed(seed + 1)
+        ok_g, gumbel_traj = run_episode("gumbel", budget, logic, model)
+    else:
+        print(f"  searching for a contrasting episode pair (budget={budget})...")
+        puct_traj, gumbel_traj, ok_p, ok_g = _find_contrasting_seed(
+            logic, model, budget, seed
+        )
 
     trajs   = [puct_traj, gumbel_traj]
     labels  = [f"PUCT (budget={budget})", f"Gumbel (budget={budget})"]
@@ -446,6 +453,8 @@ def main():
                     default="demo/car_parking_plot.png")
     ap.add_argument("--out-anim",    type=str,
                     default="demo/car_parking_anim.gif")
+    ap.add_argument("--fair", action="store_true",
+                    help="Use fixed seed for animation instead of cherry-picking")
     args = ap.parse_args()
 
     budgets     = [int(x) for x in args.budgets.split(",")]
@@ -469,7 +478,8 @@ def main():
     plot_results(results, args.episodes, args.out_plot)
 
     print(f"\nGenerating animation at budget={budget_anim}...")
-    make_animation(logic, model, budget_anim, args.seed, args.out_anim)
+    make_animation(logic, model, budget_anim, args.seed, args.out_anim,
+                   fair=args.fair)
 
 
 if __name__ == "__main__":

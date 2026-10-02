@@ -102,10 +102,53 @@ def _macro_targets(raw_env):
 def _load_policy(model_id: str = "lerobot/diffusion_pusht_keypoints"):
     """Load lerobot DiffusionPolicy from HuggingFace. Returns None if unavailable."""
     try:
+        import json, tempfile
         import torch
+        from huggingface_hub import hf_hub_download
+        from safetensors.torch import load_file
         from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+
         print(f"Loading {model_id} ...")
-        policy = DiffusionPolicy.from_pretrained(model_id)
+        cfg_path = hf_hub_download(model_id, "config.json")
+        weights_path = hf_hub_download(model_id, "model.safetensors")
+
+        with open(cfg_path) as f:
+            cfg = json.load(f)
+
+        # The HF checkpoint uses the old lerobot config schema (pre-0.4).
+        # Translate to the current draccus-based format if needed.
+        if "type" not in cfg:
+            sd = load_file(weights_path)
+            norm_stats = {k: v for k, v in sd.items() if "normalize" in k}
+
+            cfg["type"] = "diffusion"
+            cfg["input_features"] = {
+                k: {"type": "ENV" if s[0] > 2 else "STATE", "shape": s}
+                for k, s in cfg.pop("input_shapes", {}).items()
+            }
+            cfg["output_features"] = {
+                k: {"type": "ACTION", "shape": s}
+                for k, s in cfg.pop("output_shapes", {}).items()
+            }
+            cfg["normalization_mapping"] = {
+                ft["type"]: mode.upper()
+                for modes_key in ("input_normalization_modes", "output_normalization_modes")
+                for k, mode in cfg.pop(modes_key, {}).items()
+                for ft in [cfg.get("input_features", {}).get(k) or
+                           cfg.get("output_features", {}).get(k, {})]
+            }
+
+            tmpdir = tempfile.mkdtemp()
+            with open(os.path.join(tmpdir, "config.json"), "w") as f:
+                json.dump(cfg, f)
+            os.symlink(weights_path, os.path.join(tmpdir, "model.safetensors"))
+
+            policy = DiffusionPolicy.from_pretrained(tmpdir)
+            policy._norm_stats = norm_stats
+        else:
+            policy = DiffusionPolicy.from_pretrained(model_id)
+            policy._norm_stats = None
+
         policy.eval()
         device = "cuda" if torch.cuda.is_available() else "cpu"
         policy = policy.to(device)
@@ -143,17 +186,35 @@ def _compute_prior(policy, raw_env, obs_history: list,
     agent_poss  = np.stack([h["agent_pos"]          for h in history])  # (2, 2)
 
     dev = next(policy.parameters()).device
+    env_t = torch.tensor(env_states, dtype=torch.float32).unsqueeze(0).to(dev)
+    state_t = torch.tensor(agent_poss, dtype=torch.float32).unsqueeze(0).to(dev)
+
+    # Old checkpoints need manual min-max normalization (buffers stripped on load).
+    ns = getattr(policy, "_norm_stats", None)
+    if ns:
+        def _norm(x, key):
+            mn = ns[f"normalize_inputs.buffer_{key.replace('.', '_')}.min"].to(dev)
+            mx = ns[f"normalize_inputs.buffer_{key.replace('.', '_')}.max"].to(dev)
+            return (x - mn) / (mx - mn + 1e-8) * 2 - 1
+        env_t = _norm(env_t, "observation.environment_state")
+        state_t = _norm(state_t, "observation.state")
+
     batch = {
-        "observation.environment_state": torch.tensor(env_states, dtype=torch.float32).unsqueeze(0).to(dev),
-        "observation.state":             torch.tensor(agent_poss,  dtype=torch.float32).unsqueeze(0).to(dev),
+        "observation.environment_state": env_t,
+        "observation.state":             state_t,
     }
 
     try:
         policy.reset()
         with torch.no_grad():
-            # Offline mode: queues are empty after reset, so predict_action_chunk
-            # uses the batch directly (n_obs_steps already stacked on dim=1).
             actions = policy.predict_action_chunk(batch)  # (1, horizon, 2)
+
+        # Unnormalize actions for old checkpoints.
+        if ns:
+            a_min = ns["unnormalize_outputs.buffer_action.min"].to(dev)
+            a_max = ns["unnormalize_outputs.buffer_action.max"].to(dev)
+            actions = (actions + 1) / 2 * (a_max - a_min) + a_min
+
         target = actions[0, 0].cpu().numpy()  # (2,) first predicted target in [0, 512]
     except Exception as e:
         print(f"[warn] Policy inference failed: {e}")
@@ -250,6 +311,14 @@ class PushTMacroEnv:
         cov, _ = self._execute_macro(action_id, record=False)
         return cov
 
+    def simulate_rollout(self, first_action: int, depth: int) -> float:
+        """Simulate first_action then (depth-1) random follow-up actions. Return final IoU."""
+        cov = 0.0
+        actions = [first_action] + [self.random_action() for _ in range(depth - 1)]
+        for action in actions:
+            cov, _ = self._execute_macro(action, record=False)
+        return cov
+
     # ── Action selection ───────────────────────────────────────────────────────
 
     def random_action(self) -> int:
@@ -267,31 +336,34 @@ class PushTMacroEnv:
         self.restore_state(root)
         return best_a
 
-    def puct_action(self, prior: np.ndarray, n_sims: int = 32, C: float = 1.5) -> int:
+    def puct_action(self, prior: np.ndarray, n_sims: int = 32, C: float = 1.5,
+                    rollout_depth: int = 1) -> int:
         """
-        PUCT with Q=0.  UCB = C · P(a) · √N / (1 + n(a)).
+        PUCT with Q updates.  UCB = Q(a) + C · P(a) · √N / (1 + n(a)).
 
-        Rollouts are simulated but their outcomes are discarded (value=0).
-        With no quality signal, visits concentrate proportionally to the prior peak —
-        the planner cannot escape a suboptimal prior through experience.
-        Final action = argmax visit count (= argmax prior, asymptotically).
+        Each rollout outcome updates Q(a) as a running mean, so the planner
+        learns which actions lead to high IoU and shifts visits accordingly.
+        Final action = argmax visit count.
         """
         root = self.save_state()
         N = np.zeros(NUM_ACTIONS, dtype=float)
+        Q = np.zeros(NUM_ACTIONS, dtype=float)
 
         for _ in range(n_sims):
             N_total = max(1.0, N.sum())
-            ucb = C * prior * np.sqrt(N_total) / (1.0 + N)
+            ucb = Q + C * prior * np.sqrt(N_total) / (1.0 + N)
             action = int(np.argmax(ucb))
             self.restore_state(root)
-            self.simulate_macro(action)  # outcome ignored — value=0
+            iou = self.simulate_rollout(action, rollout_depth)
             N[action] += 1.0
+            Q[action] += (iou - Q[action]) / N[action]
 
         self.restore_state(root)
         return int(np.argmax(N))
 
     def gumbel_action(self, prior: np.ndarray | None = None,
-                      n_sims: int = 32, max_k: int = 8, depth: int = 1) -> int:
+                      n_sims: int = 32, max_k: int = 8,
+                      rollout_depth: int = 1) -> int:
         """
         Gumbel sequential halving with log-prior perturbation.
 
@@ -301,6 +373,11 @@ class PushTMacroEnv:
 
         Phase halving ranks survivors by mean_Q(a) + Gumbel score, letting
         actual rollout IoU override a misguided prior over time.
+
+        When rollout_depth > 1, each simulation executes the candidate action
+        followed by (rollout_depth - 1) random actions, returning the final IoU.
+        This gives the planner a longer horizon to discover multi-step sequences
+        (e.g. rotations) that only pay off several actions later.
         """
         if prior is None:
             prior = np.ones(NUM_ACTIONS, dtype=np.float32) / NUM_ACTIONS
@@ -329,10 +406,7 @@ class PushTMacroEnv:
             for action in candidates:
                 for _ in range(spc):
                     self.restore_state(root)
-                    iou = self.simulate_macro(action)
-                    if depth > 1:
-                        sub = int(self._rng.integers(NUM_ACTIONS))
-                        iou = self.simulate_macro(sub)
+                    iou = self.simulate_rollout(action, rollout_depth)
                     visits[action] += 1
                     total_q[action] += iou
                     remaining -= 1
@@ -356,7 +430,8 @@ class PushTMacroEnv:
 # ── Episode runner ─────────────────────────────────────────────────────────────
 
 def run_episode(strategy: str, seed: int, n_macros: int, budget: int,
-                policy, record: bool) -> tuple[list[float], list[np.ndarray]]:
+                policy, record: bool,
+                rollout_depth: int = 1) -> tuple[list[float], list[np.ndarray]]:
     env = PushTMacroEnv(seed=seed, record=record)
     raw = env.env.unwrapped
     env.reset()
@@ -370,9 +445,11 @@ def run_episode(strategy: str, seed: int, n_macros: int, budget: int,
 
         t0 = time.perf_counter()
         if strategy == "puct":
-            action = env.puct_action(prior, n_sims=budget)
+            action = env.puct_action(prior, n_sims=budget,
+                                     rollout_depth=rollout_depth)
         elif strategy == "gumbel":
-            action = env.gumbel_action(prior, n_sims=budget)
+            action = env.gumbel_action(prior, n_sims=budget,
+                                       rollout_depth=rollout_depth)
         elif strategy == "random":
             action = env.random_action()
         elif strategy == "greedy":
@@ -410,7 +487,12 @@ def _pad_to_same_height(img_a: np.ndarray, img_b: np.ndarray) -> tuple:
 
 
 def make_gif(frames_left, frames_right, label_left, label_right, out_path, fps=15):
-    from PIL import ImageDraw
+    from PIL import ImageDraw, ImageFont
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
+    except OSError:
+        font = ImageFont.load_default(size=18)
+
     n = max(len(frames_left), len(frames_right))
     last_l = frames_left[-1]  if frames_left  else np.zeros((100, 100, 3), dtype=np.uint8)
     last_r = frames_right[-1] if frames_right else np.zeros((100, 100, 3), dtype=np.uint8)
@@ -423,11 +505,18 @@ def make_gif(frames_left, frames_right, label_left, label_right, out_path, fps=1
         divider = np.full((fl.shape[0], 4, 3), 220, dtype=np.uint8)
         combined = np.concatenate([fl, divider, fr], axis=1)
         pil_img = Image.fromarray(combined)
-        draw = ImageDraw.Draw(pil_img)
+        draw = ImageDraw.Draw(pil_img, "RGBA")
         w = fl.shape[1]
-        draw.text((8, 6),      label_left,  fill=(255, 255, 80))
-        draw.text((w + 12, 6), label_right, fill=(80, 220, 255))
-        pil_frames.append(pil_img)
+        banner = (0, 0, 0, 160)
+        for x_off, label, color in [
+            (0, label_left, (255, 220, 80)),
+            (w + 4, label_right, (80, 200, 255)),
+        ]:
+            bbox = font.getbbox(label)
+            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            draw.rectangle([x_off, 0, x_off + tw + 16, th + 12], fill=banner)
+            draw.text((x_off + 8, 4), label, fill=color, font=font)
+        pil_frames.append(pil_img.convert("RGB"))
 
     duration_ms = int(1000 / fps)
     pil_frames[0].save(out_path, save_all=True, append_images=pil_frames[1:],
@@ -444,6 +533,8 @@ def parse_args():
                    help="Max macro-actions per episode")
     p.add_argument("--budget",     type=int,   default=32,
                    help="Simulation budget per macro-step")
+    p.add_argument("--rollout-depth", type=int, default=1,
+                   help="Lookahead depth per simulation (receding horizon)")
     p.add_argument("--strategy-a", default="puct",
                    choices=["random", "greedy", "puct", "gumbel"])
     p.add_argument("--strategy-b", default="gumbel",
@@ -460,7 +551,7 @@ def main():
 
     print(f"\n{'='*60}")
     print(f" PushT  —  PUCT (Q=0) vs Gumbel  |  prior: diffusion policy")
-    print(f" seed={args.seed}  n_macros={args.n_macros}  budget={args.budget}")
+    print(f" seed={args.seed}  n_macros={args.n_macros}  budget={args.budget}  rollout_depth={args.rollout_depth}")
     print(f" comparing: {args.strategy_a}  vs  {args.strategy_b}")
     print(f"{'='*60}\n")
 
@@ -469,12 +560,14 @@ def main():
 
     print(f"\n── Strategy A: {args.strategy_a} ──")
     covs_a, frames_a = run_episode(
-        args.strategy_a, args.seed, args.n_macros, args.budget, policy, record
+        args.strategy_a, args.seed, args.n_macros, args.budget, policy, record,
+        rollout_depth=args.rollout_depth,
     )
 
     print(f"\n── Strategy B: {args.strategy_b} ──")
     covs_b, frames_b = run_episode(
-        args.strategy_b, args.seed, args.n_macros, args.budget, policy, record
+        args.strategy_b, args.seed, args.n_macros, args.budget, policy, record,
+        rollout_depth=args.rollout_depth,
     )
 
     print(f"\n{'='*60}")
@@ -484,7 +577,9 @@ def main():
 
     if record:
         gif_path = os.path.join(out_dir, "pusht_comparison.gif")
-        make_gif(frames_a, frames_b, args.strategy_a, args.strategy_b, gif_path, fps=15)
+        label_a = f"{args.strategy_a}  IoU={covs_a[-1]:.2f}"
+        label_b = f"{args.strategy_b}  IoU={covs_b[-1]:.2f}"
+        make_gif(frames_a, frames_b, label_a, label_b, gif_path, fps=15)
 
 
 if __name__ == "__main__":
