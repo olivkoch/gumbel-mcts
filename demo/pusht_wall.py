@@ -161,22 +161,49 @@ class WallGapEnv:
             return self.fraction_past_wall()
 
         approach, push_end = self._macro_targets()
+        agent_x_limit = WALL_X - 15 - 15
         half = self.gap_size / 2
-        wall_left = WALL_X - 15   # wall box left edge
-        agent_r = 15.0
+        wall_left = WALL_X - 15
         step_count = 0
         for target, n in [(approach[action], N_APPROACH),
                           (push_end[action], N_PUSH),
                           (push_end[action], N_SETTLE)]:
+            clipped = target.copy()
+            clipped[0] = min(clipped[0], agent_x_limit)
             for si in range(n):
-                self.env.step(target.astype(np.float32))
-                # Enforce wall collision for the kinematic agent
+                # Save state before step
+                prev_block_pos = list(raw.block.position)
+                prev_block_angle = raw.block.angle
+                prev_block_vel = list(raw.block.velocity)
+                prev_block_angvel = raw.block.angular_velocity
+
+                self.env.step(clipped.astype(np.float32))
+
+                # Check if block overlaps wall (not gap)
+                bx, by = raw.block.position
+                ba = raw.block.angle
+                c, s = np.cos(ba), np.sin(ba)
+                R = np.array([[c, -s], [s, c]])
+                kp = (R @ LOCAL_VERTS.T).T + np.array([bx, by])
+                wall_violation = False
+                for kx, ky in kp:
+                    if kx > wall_left and (ky > GAP_CENTER_Y + half or ky < GAP_CENTER_Y - half):
+                        wall_violation = True
+                        break
+
+                if wall_violation:
+                    raw.block.angle = prev_block_angle
+                    raw.block.position = prev_block_pos
+                    raw.block.velocity = (0, 0)
+                    raw.block.angular_velocity = 0
+
+                # Clamp agent
                 ax, ay = raw.agent.position
-                if ax + agent_r > wall_left:
+                if ax > agent_x_limit:
                     in_gap = (GAP_CENTER_Y - half) < ay < (GAP_CENTER_Y + half)
                     if not in_gap:
-                        raw.agent.position = (wall_left - agent_r, ay)
-                        raw.agent.velocity = (0, raw.agent.velocity[1])
+                        raw.agent.position = (agent_x_limit, ay)
+
                 step_count += 1
                 if self.record and step_count % 3 == 0:
                     self.frames.append(self.env.render())
