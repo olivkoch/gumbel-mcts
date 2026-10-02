@@ -29,7 +29,8 @@ class PUCTStorage:
         self.is_expanded = np.zeros(max_nodes, dtype=np.bool_)
         self.is_terminal = np.zeros(max_nodes, dtype=np.bool_)
         
-        self.boards = np.zeros((max_nodes, *self.board_shape), dtype=np.int8)
+        board_dtype = getattr(logic, 'BOARD_DTYPE', np.int8)
+        self.boards = np.zeros((max_nodes, *self.board_shape), dtype=board_dtype)
         self.players = np.zeros(max_nodes, dtype=np.int8)
         self.root_indices = np.zeros(n_games, dtype=np.int32)
 
