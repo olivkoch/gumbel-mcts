@@ -250,10 +250,12 @@ class PushTModel:
         if target is None:
             return np.full(NUM_ACTIONS, 1.0 / NUM_ACTIONS, dtype=np.float32)
 
-        # Score each push action by proximity of push_end to target
-        _, push_end = _macro_targets(raw)
-        dists = np.linalg.norm(push_end - target, axis=1)
-        temperature = 0.1
+        # The diffusion model predicts a trajectory of agent positions.
+        # Score each action by how close its approach point is to the
+        # trajectory endpoint (where the agent is heading).
+        approach, _ = _macro_targets(raw)
+        dists = np.linalg.norm(approach - target, axis=1)
+        temperature = 0.05
         logits = -dists / (temperature * 512.0)
         logits -= logits.max()
         probs = np.exp(logits)
@@ -294,7 +296,7 @@ class PushTModel:
                 a_min = ns["unnormalize_outputs.buffer_action.min"].to(dev)
                 a_max = ns["unnormalize_outputs.buffer_action.max"].to(dev)
                 actions = (actions + 1) / 2 * (a_max - a_min) + a_min
-            return actions[0, 0].cpu().numpy()
+            return actions[0, -1].cpu().numpy()
         except Exception:
             return None
 
