@@ -168,8 +168,22 @@ class CarParkingLogic:
     get_valid_mask = staticmethod(get_valid_mask)
 
     @staticmethod
-    def get_initial_board():
-        return START.copy()
+    def get_initial_board(rng=None):
+        if rng is None:
+            return START.copy()
+        # Random start: pick a valid cell (not obstacle, not goal, not adjacent to goal)
+        obs_set = set(map(tuple, OBSTACLES.tolist()))
+        goal_xy = (int(GOAL[0]), int(GOAL[1]))
+        while True:
+            x = rng.integers(0, GRID)
+            y = rng.integers(0, GRID)
+            if (x, y) in obs_set or (x, y) == goal_xy:
+                continue
+            # Keep some distance from goal so it's not trivial
+            if abs(x - GOAL[0]) + abs(y - GOAL[1]) < 4:
+                continue
+            theta = rng.integers(0, N_ANGLES)
+            return np.array([x, y, theta], dtype=np.int8)
 
 
 # ── Model ─────────────────────────────────────────────────────────────────────
@@ -221,13 +235,13 @@ class CarModel:
 
 # ── Episode runner ────────────────────────────────────────────────────────────
 
-def run_episode(algo, num_sims, logic, model):
+def run_episode(algo, num_sims, logic, model, start_board=None):
     """Run one episode; returns (success: bool, trajectory: list[np.ndarray]).
 
     The MCTS tree alternates Player 1 (car) and Player 2 (dummy pass).
     Externally we only step Player 1's chosen action each iteration.
     """
-    board     = logic.get_initial_board()
+    board     = start_board.copy() if start_board is not None else logic.get_initial_board()
     traj      = [board.copy()]
     # Episode cap = effective car moves (half of MAX_MOVES)
     max_car_steps = logic.MAX_MOVES // 2
@@ -263,11 +277,15 @@ def sweep(budgets, n_episodes, seed, logic, model):
         puct_ok = gumbel_ok = 0
         for ep in range(n_episodes):
             base = seed + sims * 10_000 + ep
+            # Same random start for both algorithms
+            start_rng = np.random.default_rng(base)
+            start_board = logic.get_initial_board(rng=start_rng)
+
             np.random.seed(base);     torch.manual_seed(base)
-            ok, _ = run_episode("puct",   sims, logic, model)
+            ok, _ = run_episode("puct",   sims, logic, model, start_board=start_board)
             puct_ok += ok
             np.random.seed(base + 1); torch.manual_seed(base + 1)
-            ok, _ = run_episode("gumbel", sims, logic, model)
+            ok, _ = run_episode("gumbel", sims, logic, model, start_board=start_board)
             gumbel_ok += ok
 
         results[sims] = {
@@ -335,10 +353,12 @@ def _find_contrasting_seed(logic, model, budget, base_seed, max_tries=50,
     best = None  # fallback: any contrasting seed, even a long one
     for i in range(max_tries):
         s = base_seed + i * 37
+        start_rng = np.random.default_rng(s)
+        start_board = logic.get_initial_board(rng=start_rng)
         np.random.seed(s);     torch.manual_seed(s)
-        ok_p, pt = run_episode("puct",   budget, logic, model)
+        ok_p, pt = run_episode("puct",   budget, logic, model, start_board=start_board)
         np.random.seed(s + 1); torch.manual_seed(s + 1)
-        ok_g, gt = run_episode("gumbel", budget, logic, model)
+        ok_g, gt = run_episode("gumbel", budget, logic, model, start_board=start_board)
         if ok_g and not ok_p:
             if len(gt) - 1 <= max_gumbel_steps:
                 return pt, gt, ok_p, ok_g   # clean short win — use it
@@ -347,20 +367,24 @@ def _find_contrasting_seed(logic, model, budget, base_seed, max_tries=50,
     if best is not None:
         return best
     # Absolute fallback: just return whatever the base seed gives
+    start_rng = np.random.default_rng(base_seed)
+    start_board = logic.get_initial_board(rng=start_rng)
     np.random.seed(base_seed);     torch.manual_seed(base_seed)
-    _, pt = run_episode("puct",   budget, logic, model)
+    _, pt = run_episode("puct",   budget, logic, model, start_board=start_board)
     np.random.seed(base_seed + 1); torch.manual_seed(base_seed + 1)
-    ok_g, gt = run_episode("gumbel", budget, logic, model)
+    ok_g, gt = run_episode("gumbel", budget, logic, model, start_board=start_board)
     return pt, gt, False, ok_g
 
 
 def make_animation(logic, model, budget, seed, out_path, *, fair=False):
     if fair:
         print(f"  running fixed-seed episode pair (budget={budget}, seed={seed})...")
+        start_rng = np.random.default_rng(seed)
+        start_board = logic.get_initial_board(rng=start_rng)
         np.random.seed(seed);     torch.manual_seed(seed)
-        ok_p, puct_traj = run_episode("puct", budget, logic, model)
+        ok_p, puct_traj = run_episode("puct", budget, logic, model, start_board=start_board)
         np.random.seed(seed + 1); torch.manual_seed(seed + 1)
-        ok_g, gumbel_traj = run_episode("gumbel", budget, logic, model)
+        ok_g, gumbel_traj = run_episode("gumbel", budget, logic, model, start_board=start_board)
     else:
         print(f"  searching for a contrasting episode pair (budget={budget})...")
         puct_traj, gumbel_traj, ok_p, ok_g = _find_contrasting_seed(
