@@ -274,23 +274,25 @@ def run_episode(algo, num_sims, logic, model, start_board=None):
 def sweep(budgets, n_episodes, seed, logic, model):
     results = {}
     for sims in budgets:
-        puct_ok = gumbel_ok = 0
+        puct_outcomes = []
+        gumbel_outcomes = []
         for ep in range(n_episodes):
             base = seed + sims * 10_000 + ep
-            # Same random start for both algorithms
             start_rng = np.random.default_rng(base)
             start_board = logic.get_initial_board(rng=start_rng)
 
             np.random.seed(base);     torch.manual_seed(base)
             ok, _ = run_episode("puct",   sims, logic, model, start_board=start_board)
-            puct_ok += ok
+            puct_outcomes.append(int(ok))
             np.random.seed(base + 1); torch.manual_seed(base + 1)
             ok, _ = run_episode("gumbel", sims, logic, model, start_board=start_board)
-            gumbel_ok += ok
+            gumbel_outcomes.append(int(ok))
 
         results[sims] = {
-            "puct":   puct_ok   / n_episodes * 100,
-            "gumbel": gumbel_ok / n_episodes * 100,
+            "puct":   sum(puct_outcomes)   / n_episodes * 100,
+            "gumbel": sum(gumbel_outcomes) / n_episodes * 100,
+            "puct_outcomes": puct_outcomes,
+            "gumbel_outcomes": gumbel_outcomes,
         }
         print(
             f"  sims={sims:3d}  |  "
@@ -307,10 +309,18 @@ def plot_results(results, n_episodes, out_path):
     puct_sr   = [results[b]["puct"]   for b in budgets]
     gumbel_sr = [results[b]["gumbel"] for b in budgets]
 
+    # 95% CI for binomial proportion
+    def ci95(p_pct, n):
+        p = p_pct / 100.0
+        return 1.96 * np.sqrt(p * (1 - p) / n) * 100
+
+    puct_ci   = [ci95(results[b]["puct"],   n_episodes) for b in budgets]
+    gumbel_ci = [ci95(results[b]["gumbel"], n_episodes) for b in budgets]
+
     fig, ax = plt.subplots(figsize=(8, 4.5))
-    kw = dict(lw=2.5, ms=8, mfc="white", mew=2)
-    ax.plot(budgets, puct_sr,   "o-", color="#5C6BC0", label="PUCT",   **kw)
-    ax.plot(budgets, gumbel_sr, "s-", color="#26A69A", label="Gumbel", **kw)
+    kw = dict(lw=2.5, ms=8, mfc="white", mew=2, capsize=4, capthick=1.5)
+    ax.errorbar(budgets, puct_sr,   yerr=puct_ci,   fmt="o-", color="#5C6BC0", label="PUCT",   **kw)
+    ax.errorbar(budgets, gumbel_sr, yerr=gumbel_ci, fmt="s-", color="#26A69A", label="Gumbel", **kw)
     ax.axhline(50, color="#BDBDBD", ls="--", lw=1)
 
     ax.set_xlabel("Simulation budget per move", fontsize=11)
