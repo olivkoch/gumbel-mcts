@@ -21,19 +21,45 @@ import gym_pusht  # noqa: F401
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-NUM_PUSH_DIRS = 8
-NUM_ACTIONS   = 9       # 0-7 push directions + 8 = no-op
-APPROACH_DIST = 80
-PUSH_DEPTH    = 60
-N_APPROACH    = 12
-N_PUSH        = 18
-N_SETTLE      = 12
-
-# Adaptive push: scale down when block is close to goal
-NEAR_DIST_THRESHOLD = 80.0   # keypoint distance below which pushes get shorter
-NEAR_PUSH_SCALE     = 0.35   # multiply step counts by this when near goal
+APPROACH_DIST = 60
+PUSH_DEPTH    = 30
+N_APPROACH    = 8
+N_PUSH        = 12
+N_SETTLE      = 8
 
 WORKSPACE_LO, WORKSPACE_HI = 0.0, 512.0
+
+# ── Fine push points along the T perimeter ───────────────────────────────────
+# Distribute contact points every ~30px along each edge of the T-block.
+# Each point pushes orthogonally inward (toward COG direction, same as before).
+
+_T_EDGES = [
+    ((-60, 0), (60, 0)),      # bar top (120px)
+    ((60, 0), (60, 30)),      # bar right (30px)
+    ((60, 30), (15, 30)),     # bar-stem right step (45px)
+    ((15, 30), (15, 120)),    # stem right (90px)
+    ((15, 120), (-15, 120)),  # stem bottom (30px)
+    ((-15, 120), (-15, 30)),  # stem left (90px)
+    ((-15, 30), (-60, 30)),   # bar-stem left step (45px)
+    ((-60, 30), (-60, 0)),    # bar left (30px)
+]
+_PUSH_SPACING = 30.0
+
+def _build_push_points():
+    import math
+    pts = []
+    for (x1, y1), (x2, y2) in _T_EDGES:
+        dx, dy = x2 - x1, y2 - y1
+        length = math.sqrt(dx**2 + dy**2)
+        n = max(1, int(round(length / _PUSH_SPACING)))
+        for i in range(n):
+            t = (i + 0.5) / n
+            pts.append((x1 + t * dx, y1 + t * dy))
+    return np.array(pts, dtype=np.float64)
+
+LOCAL_PUSH_POINTS = _build_push_points()
+NUM_PUSH_DIRS = len(LOCAL_PUSH_POINTS)
+NUM_ACTIONS   = NUM_PUSH_DIRS + 1     # push points + no-op
 
 # ── Goal geometry (for adaptive push + value) ────────────────────────────────
 
@@ -77,17 +103,19 @@ def _keypoints(block):
 
 
 def _macro_targets(raw_env):
-    kp = _keypoints(raw_env.block)
-    face_pts = np.array([
-        (kp[0] + kp[1]) / 2, (kp[1] + kp[2]) / 2,
-        (kp[5] + kp[6]) / 2, (kp[3] + kp[0]) / 2,
-        kp[0], kp[1], kp[5], kp[6],
-    ])
-    cog = kp.mean(axis=0)
-    d = face_pts - cog
+    """Compute approach and push-end points for all fine push actions."""
+    block = raw_env.block
+    angle = block.angle
+    bx, by = block.position
+    c, s = np.cos(angle), np.sin(angle)
+    R = np.array([[c, -s], [s, c]])
+    # Transform local push points to world coordinates
+    world_pts = (R @ LOCAL_PUSH_POINTS.T).T + np.array([bx, by])
+    cog = (R @ LOCAL_VERTS.T).T.mean(axis=0) + np.array([bx, by])
+    d = world_pts - cog
     outward = d / np.linalg.norm(d, axis=1, keepdims=True).clip(min=1e-6)
-    approach = np.clip(face_pts + APPROACH_DIST * outward, WORKSPACE_LO, WORKSPACE_HI)
-    push_end = np.clip(face_pts - PUSH_DEPTH * outward, WORKSPACE_LO, WORKSPACE_HI)
+    approach = np.clip(world_pts + APPROACH_DIST * outward, WORKSPACE_LO, WORKSPACE_HI)
+    push_end = np.clip(world_pts - PUSH_DEPTH * outward, WORKSPACE_LO, WORKSPACE_HI)
     return approach, push_end
 
 
@@ -121,7 +149,6 @@ def _pusht_fast_step(board, action, player):
     """Execute one macro-action. Modifies board in-place. Returns (reward, winner, done, board)."""
     action = int(action)
 
-    # No-op: return current IoU without moving
     if action == NUM_PUSH_DIRS:
         env = _get_env()
         _restore_state(env, board)
@@ -131,25 +158,20 @@ def _pusht_fast_step(board, action, player):
     env = _get_env()
     _restore_state(env, board)
 
-    # Adaptive push depth: shorter pushes when block is near goal
-    dist = _keypoint_dist_to_goal(board)
-    if dist < NEAR_DIST_THRESHOLD:
-        scale = NEAR_PUSH_SCALE
-    else:
-        scale = 1.0
-    n_approach = max(2, int(N_APPROACH * scale))
-    n_push = max(2, int(N_PUSH * scale))
-    n_settle = max(2, int(N_SETTLE * scale))
-
     raw = env.unwrapped
     approach, push_end = _macro_targets(raw)
     cov = 0.0
-    for target, n in [(approach[action], n_approach),
-                      (push_end[action], n_push),
-                      (push_end[action], n_settle)]:
+    for target, n in [(approach[action], N_APPROACH),
+                      (push_end[action], N_PUSH),
+                      (push_end[action], N_SETTLE)]:
         for _ in range(n):
             _, _, _, _, info = env.step(target.astype(np.float32))
             cov = info.get("coverage", 0.0)
+            # Clamp block to scene boundaries
+            bx, by = raw.block.position
+            bx = max(60.0, min(452.0, bx))
+            by = max(60.0, min(452.0, by))
+            raw.block.position = (bx, by)
 
     new_state = _read_state(env)
     board[:] = new_state
@@ -158,8 +180,7 @@ def _pusht_fast_step(board, action, player):
 
 
 def _pusht_valid_mask(board, player):
-    mask = np.ones(NUM_ACTIONS, dtype=np.float32)
-    return mask
+    return np.ones(NUM_ACTIONS, dtype=np.float32)
 
 
 # ── GameLogic ─────────────────────────────────────────────────────────────────
@@ -207,8 +228,12 @@ class PushTModel:
         self._obs_history = []
 
     def _compute_prior_from_board(self, board_np):
-        """Compute diffusion prior from a board state [agent_x, agent_y, block_x, block_y, angle]."""
-        from pusht import _compute_prior, _macro_targets
+        """Compute diffusion prior over fine push actions.
+
+        The diffusion model predicts a (x,y) target. We score each push
+        action's push_end by proximity to that target, then softmax.
+        """
+        from pusht import _compute_prior as _compute_prior_8
         env = _get_env()
         _restore_state(env, board_np)
         raw = env.unwrapped
@@ -220,17 +245,62 @@ class PushTModel:
         if not self._obs_history:
             self._obs_history.append(obs)
 
-        prior_8 = _compute_prior(self.policy, raw, self._obs_history)
-        # Extend to 9 actions (add no-op with low weight)
+        # Get the predicted (x,y) target from the diffusion model
+        target = self._get_diffusion_target(raw)
+        if target is None:
+            return np.full(NUM_ACTIONS, 1.0 / NUM_ACTIONS, dtype=np.float32)
+
+        # Score each push action by proximity of push_end to target
+        _, push_end = _macro_targets(raw)
+        dists = np.linalg.norm(push_end - target, axis=1)
+        temperature = 0.1
+        logits = -dists / (temperature * 512.0)
+        logits -= logits.max()
+        probs = np.exp(logits)
         prior = np.ones(NUM_ACTIONS, dtype=np.float32)
-        prior[:NUM_PUSH_DIRS] = prior_8
+        prior[:NUM_PUSH_DIRS] = probs
         prior[NUM_PUSH_DIRS] = 0.02
         prior /= prior.sum()
         return prior
 
+    def _get_diffusion_target(self, raw_env):
+        """Run diffusion model, return predicted (x,y) target or None."""
+        if self.policy is None:
+            return None
+        import torch
+        history = self._obs_history[-2:] if len(self._obs_history) >= 2 else [self._obs_history[0]] * 2
+        env_states = np.stack([h["environment_state"] for h in history])
+        agent_poss = np.stack([h["agent_pos"] for h in history])
+        dev = next(self.policy.parameters()).device
+        env_t = torch.tensor(env_states, dtype=torch.float32).unsqueeze(0).to(dev)
+        state_t = torch.tensor(agent_poss, dtype=torch.float32).unsqueeze(0).to(dev)
+        ns = getattr(self.policy, "_norm_stats", None)
+        if ns:
+            def _norm(x, key):
+                mn = ns[f"normalize_inputs.buffer_{key.replace('.', '_')}.min"].to(dev)
+                mx = ns[f"normalize_inputs.buffer_{key.replace('.', '_')}.max"].to(dev)
+                return (x - mn) / (mx - mn + 1e-8) * 2 - 1
+            env_t = _norm(env_t, "observation.environment_state")
+            state_t = _norm(state_t, "observation.state")
+        batch = {
+            "observation.environment_state": env_t,
+            "observation.state": state_t,
+        }
+        try:
+            self.policy.reset()
+            with torch.no_grad():
+                actions = self.policy.predict_action_chunk(batch)
+            if ns:
+                a_min = ns["unnormalize_outputs.buffer_action.min"].to(dev)
+                a_max = ns["unnormalize_outputs.buffer_action.max"].to(dev)
+                actions = (actions + 1) / 2 * (a_max - a_min) + a_min
+            return actions[0, 0].cpu().numpy()
+        except Exception:
+            return None
+
     def forward_for_mcts(self, batch):
         B = batch["boards"].shape[0]
-        boards = batch["boards"].float()
+        boards = batch["boards"].float().cpu()
 
         policy_out = torch.zeros(B, self.logic.NUM_ACTIONS)
         value_out = torch.zeros(B, 1)
