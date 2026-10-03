@@ -22,8 +22,8 @@ import gym_pusht  # noqa: F401
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-STEP_SIZE     = 25        # pixels per micro-action push
-N_PHYSICS     = 10        # physics steps per micro-action
+BASE_STEP_SIZE = 25       # pixels per micro-action push at IoU=0
+N_PHYSICS      = 10       # physics steps per micro-action
 SUCCESS_IOU   = 0.80      # IoU threshold above which no-op keeps value
 
 WORKSPACE_LO, WORKSPACE_HI = 0.0, 512.0
@@ -124,11 +124,16 @@ def _keypoint_dist_to_goal(board):
 
 # ── Compute push targets ────────────────────────────────────────────────────
 
-def _compute_push_targets(raw_env):
+def _compute_push_targets(raw_env, step_size=None):
     """For each of 51 push actions, compute the agent target position.
 
+    step_size scales linearly: BASE_STEP_SIZE at IoU=0, 0 at IoU=1.
     Returns (51, 2) array of agent target positions.
     """
+    if step_size is None:
+        iou = raw_env._get_coverage()
+        step_size = BASE_STEP_SIZE * (1.0 - iou)
+
     block = raw_env.block
     angle = block.angle
     bx, by = block.position
@@ -146,8 +151,7 @@ def _compute_push_targets(raw_env):
         tangent_ccw = np.array([-outward[1], outward[0]])
 
         for direction in [outward, tangent_cw, tangent_ccw]:
-            # Agent target: slightly past the touch point, pushing inward
-            agent_target = pt + direction * STEP_SIZE
+            agent_target = pt + direction * step_size
             targets.append(np.clip(agent_target, WORKSPACE_LO, WORKSPACE_HI))
 
     return np.array(targets)
@@ -183,19 +187,14 @@ def _pusht_fast_step(board, action, player):
     board[:] = new_state
     iou_after = raw._get_coverage()
 
-    # Value logic:
-    # - If block didn't move: 0 (discard useless actions)
-    # - If block moved: IoU + distance-based shaping
-    # - If IoU already at success: IoU (reward maintaining)
-    if iou_before >= SUCCESS_IOU:
-        value = iou_after
-    elif not _block_moved(board_before, board):
-        value = 0.0
-    else:
-        kp_dist = _keypoint_dist_to_goal(board)
-        dist_score = max(0.0, 1.0 - kp_dist / 200.0)  # [0, 1] normalized
-        value = max(iou_after, dist_score * 0.4)  # IoU when close, distance when far
-
+    # If block didn't move, mark as terminal with value=0.
+    # This prevents the tree from evaluating the child node's model value
+    # (which would be the same IoU as the parent, making the action look good).
+    if not _block_moved(board_before, board):
+        return 0.0, 0, True, board  # terminal=True, value=0
+    kp_dist = _keypoint_dist_to_goal(board)
+    dist_score = max(0.0, 1.0 - kp_dist / 200.0)
+    value = max(iou_after, dist_score * 0.4)
     return float(value), 0, False, board
 
 
@@ -293,7 +292,9 @@ class PushTModel:
             _restore_state(env, board_np)
             raw = env.unwrapped
             iou = raw._get_coverage()
-            value_out[b] = iou
+            kp_dist = _keypoint_dist_to_goal(board_np)
+            dist_score = max(0.0, 1.0 - kp_dist / 200.0) * 0.4
+            value_out[b] = max(iou, dist_score)
 
             if self.policy is not None and self._obs_history:
                 target = self._get_diffusion_target(raw)
