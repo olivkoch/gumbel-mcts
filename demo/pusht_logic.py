@@ -58,8 +58,8 @@ def _build_push_points():
     return np.array(pts, dtype=np.float64)
 
 LOCAL_PUSH_POINTS = _build_push_points()
-NUM_PUSH_DIRS = len(LOCAL_PUSH_POINTS)
-NUM_ACTIONS   = NUM_PUSH_DIRS + 1     # push points + no-op
+NUM_PUSH_DIRS = len(LOCAL_PUSH_POINTS) * 3   # 3 directions per point (inward, tangent CW, tangent CCW)
+NUM_ACTIONS   = NUM_PUSH_DIRS + 1             # push directions + no-op
 
 # ── Goal geometry (for adaptive push + value) ────────────────────────────────
 
@@ -103,20 +103,38 @@ def _keypoints(block):
 
 
 def _macro_targets(raw_env):
-    """Compute approach and push-end points for all fine push actions."""
+    """Compute approach and push-end points for all fine push actions.
+
+    For each surface point we generate 3 push directions:
+      - inward (toward COG): translates the block
+      - tangent CW: rotates the block clockwise
+      - tangent CCW: rotates the block counter-clockwise
+    Total actions = len(LOCAL_PUSH_POINTS) * 3 + 1 (no-op).
+    """
     block = raw_env.block
     angle = block.angle
     bx, by = block.position
     c, s = np.cos(angle), np.sin(angle)
     R = np.array([[c, -s], [s, c]])
-    # Transform local push points to world coordinates
     world_pts = (R @ LOCAL_PUSH_POINTS.T).T + np.array([bx, by])
     cog = (R @ LOCAL_VERTS.T).T.mean(axis=0) + np.array([bx, by])
-    d = world_pts - cog
-    outward = d / np.linalg.norm(d, axis=1, keepdims=True).clip(min=1e-6)
-    approach = np.clip(world_pts + APPROACH_DIST * outward, WORKSPACE_LO, WORKSPACE_HI)
-    push_end = np.clip(world_pts - PUSH_DEPTH * outward, WORKSPACE_LO, WORKSPACE_HI)
-    return approach, push_end
+
+    all_approach = []
+    all_push_end = []
+    for pt in world_pts:
+        d = pt - cog
+        outward = d / max(np.linalg.norm(d), 1e-6)
+        # Tangent directions (perpendicular to outward)
+        tangent_cw = np.array([outward[1], -outward[0]])
+        tangent_ccw = np.array([-outward[1], outward[0]])
+
+        for direction in [outward, tangent_cw, tangent_ccw]:
+            app = np.clip(pt + APPROACH_DIST * direction, WORKSPACE_LO, WORKSPACE_HI)
+            end = np.clip(pt - PUSH_DEPTH * direction, WORKSPACE_LO, WORKSPACE_HI)
+            all_approach.append(app)
+            all_push_end.append(end)
+
+    return np.array(all_approach), np.array(all_push_end)
 
 
 def _restore_state(env, board):
