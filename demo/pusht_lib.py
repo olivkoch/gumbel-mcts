@@ -27,12 +27,13 @@ import torch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pusht_logic import PushTLogic, PushTModel, PythonPUCT, PythonGumbelDense
-from pusht import make_gif
+from pusht import make_gif, _load_policy
 
 
 def run_episode(algo, logic, model, num_sims, n_macros, record=False):
     """Run one episode. Returns (coverages, frames)."""
     logic.reset()
+    model.reset_obs_history()
     board = logic.get_initial_board()
     max_nodes = max(num_sims * 8 + 100, 400)
 
@@ -74,11 +75,18 @@ def run_episode(algo, logic, model, num_sims, n_macros, record=False):
         _, _, _, board = logic.fast_step(board.copy(), action, 1)
 
         # Get IoU from the environment state
-        from pusht_logic import _get_env, _restore_state
+        from pusht_logic import _get_env, _restore_state, _keypoints
         env = _get_env()
         _restore_state(env, board)
-        cov = env.unwrapped._get_coverage()
+        raw = env.unwrapped
+        cov = raw._get_coverage()
         coverages.append(cov)
+
+        # Update obs history for diffusion prior
+        model._obs_history.append({
+            "environment_state": _keypoints(raw.block).flatten().astype(np.float32),
+            "agent_pos": np.array(raw.agent.position, dtype=np.float32),
+        })
 
         if record:
             from pusht_logic import _restore_state as rs
@@ -99,16 +107,20 @@ def main():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--n-macros", type=int, default=10)
     p.add_argument("--budget", type=int, default=32)
+    p.add_argument("--no-prior", action="store_true",
+                   help="Skip diffusion policy, use uniform prior")
     p.add_argument("--no-gif", action="store_true")
     args = p.parse_args()
 
     out_dir = os.path.dirname(os.path.abspath(__file__))
+    policy = None if args.no_prior else _load_policy()
     logic = PushTLogic(seed=args.seed)
-    model = PushTModel(logic)
+    model = PushTModel(logic, diffusion_policy=policy)
 
+    prior_label = "uniform" if policy is None else "diffusion"
     print(f"\n{'='*60}")
     print(f" PushT (library)  —  PUCT vs Gumbel  |  budget={args.budget}")
-    print(f" seed={args.seed}  n_macros={args.n_macros}")
+    print(f" seed={args.seed}  n_macros={args.n_macros}  prior={prior_label}")
     print(f"{'='*60}\n")
 
     record = not args.no_gif

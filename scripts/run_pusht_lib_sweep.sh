@@ -21,6 +21,7 @@ echo ""
 
 uv run --python 3.12 \
     --with gymnasium --with "gym-pusht" --with "pymunk<7" \
+    --with "lerobot[diffusion]" --with huggingface_hub --with safetensors \
     python demo/pusht_lib_sweep.py "$@"
 
 echo ""

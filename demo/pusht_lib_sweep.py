@@ -17,6 +17,7 @@ import torch
 
 from pusht_logic import PushTLogic, PushTModel
 from pusht_lib import run_episode
+from pusht import _load_policy
 
 SUCCESS_THRESHOLD = 0.40
 
@@ -26,10 +27,13 @@ def main():
     p.add_argument("--budgets", type=int, nargs="+", default=[4, 8, 16, 32, 64, 128])
     p.add_argument("--seeds", type=int, default=50)
     p.add_argument("--n-macros", type=int, default=10)
+    p.add_argument("--no-prior", action="store_true",
+                   help="Skip diffusion policy, use uniform prior")
     args = p.parse_args()
 
+    policy = None if args.no_prior else _load_policy()
     logic = PushTLogic()
-    model = PushTModel(logic)
+    model = PushTModel(logic, diffusion_policy=policy)
     seeds = [int(s * 137 + 42) for s in range(args.seeds)]
     results = {}
 

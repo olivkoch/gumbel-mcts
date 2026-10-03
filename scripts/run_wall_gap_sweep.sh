@@ -22,6 +22,7 @@ echo ""
 
 uv run --python 3.12 \
     --with gymnasium --with "gym-pusht" --with "pymunk<7" \
+    --with "lerobot[diffusion]" --with huggingface_hub --with safetensors \
     python demo/wall_gap_sweep.py "$@"
 
 echo ""

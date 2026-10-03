@@ -5,6 +5,8 @@ Tests whether MCTS can identify safe root actions (those that don't crash the
 block into the wall) before committing — the setting where Gumbel's sequential
 halving should outperform PUCT's depth-first exploration.
 
+Uses the same lerobot/diffusion_pusht_keypoints prior as the PushT demo.
+
 Usage:
     uv run python demo/pusht_wall.py --gap-size 200 --budget 32
     uv run python demo/pusht_wall.py --gap-size 80 --budget 64
@@ -27,9 +29,9 @@ import gymnasium as gym
 import gym_pusht  # noqa: F401
 from PIL import Image
 
-# Reuse pusht.py's GIF maker
+# Reuse pusht.py's GIF maker and diffusion prior
 sys.path.insert(0, os.path.dirname(__file__))
-from pusht import make_gif
+from pusht import make_gif, _load_policy, _compute_prior, _keypoints, _make_obs
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -213,55 +215,114 @@ class WallGapEnv:
 
 # ── Episode runner ────────────────────────────────────────────────────────────
 
-def run_episode(env, strategy, n_macros, budget):
+def run_episode(env, strategy, n_macros, budget, policy=None):
     """Run one episode with flat-bandit MCTS. Returns list of fraction_past_wall."""
     env.reset()
+    raw = env.env.unwrapped
+    obs_history = [_make_obs(raw)]
     results = []
+    n_actions = NUM_PUSH_DIRS + 1
 
     for step_i in range(n_macros):
         root_state = env.state()
+        prior = _compute_prior(policy, raw, obs_history)
+        # Extend prior to include no-op action with low weight
+        prior_full = np.ones(n_actions, dtype=np.float32)
+        prior_full[:NUM_PUSH_DIRS] = prior
+        prior_full[NUM_PUSH_DIRS] = 0.02  # small no-op weight
+        prior_full /= prior_full.sum()
+
         t0 = time.perf_counter()
 
         if strategy == "random":
-            action = int(env._rng.integers(NUM_PUSH_DIRS + 1))
+            action = int(env._rng.integers(n_actions))
+        elif strategy == "puct":
+            action = _puct_select(env, root_state, prior_full, budget)
+        elif strategy == "gumbel":
+            action = _gumbel_select_sh(env, root_state, prior_full, budget)
         else:
-            # Flat bandit evaluation: try each action, pick best
-            scores = np.zeros(NUM_PUSH_DIRS + 1)
-            counts = np.zeros(NUM_PUSH_DIRS + 1)
-
-            # Disable recording during planning simulations
-            was_recording = env.record
-            env.record = False
-            for _ in range(budget):
-                if strategy == "puct":
-                    N_total = max(1, counts.sum())
-                    ucb = scores / counts.clip(min=1) + 1.5 * np.sqrt(np.log(N_total) / counts.clip(min=1))
-                    ucb[counts == 0] = 1e9
-                    a = int(np.argmax(ucb))
-                elif strategy == "gumbel":
-                    a = _gumbel_select(scores, counts, budget, NUM_PUSH_DIRS + 1)
-
-                _restore(env, root_state)
-                frac = env.step(a)
-                counts[a] += 1
-                scores[a] += frac
-            env.record = was_recording
-
-            if strategy == "puct":
-                action = int(np.argmax(counts))
-            elif strategy == "gumbel":
-                mean_q = np.where(counts > 0, scores / counts, -1)
-                action = int(np.argmax(mean_q))
+            raise ValueError(f"Unknown strategy: {strategy!r}")
 
         _restore(env, root_state)
         frac = env.step(action)
         dt = time.perf_counter() - t0
         results.append(frac)
+        obs_history.append(_make_obs(raw))
 
+        prior_str = " ".join(f"{p:.2f}" for p in prior_full)
         print(f"[{strategy:6s}] step {step_i+1}/{n_macros} | action={action} | "
               f"frac={frac:.3f} | plan={dt:.2f}s")
+        print(f"          prior=[{prior_str}]")
 
     return results
+
+
+def _puct_select(env, root_state, prior, budget):
+    """PUCT with Q updates and prior-weighted UCB."""
+    n_actions = len(prior)
+    N = np.zeros(n_actions, dtype=float)
+    Q = np.zeros(n_actions, dtype=float)
+    was_recording = env.record
+    env.record = False
+    for _ in range(budget):
+        N_total = max(1.0, N.sum())
+        ucb = Q + 1.5 * prior * np.sqrt(N_total) / (1.0 + N)
+        a = int(np.argmax(ucb))
+        _restore(env, root_state)
+        frac = env.step(a)
+        N[a] += 1.0
+        Q[a] += (frac - Q[a]) / N[a]
+    env.record = was_recording
+    return int(np.argmax(N))
+
+
+def _gumbel_select_sh(env, root_state, prior, budget):
+    """Gumbel sequential halving with log-prior perturbation."""
+    n_actions = len(prior)
+    log_prior = np.log(prior.clip(min=1e-8))
+    u = np.random.uniform(1e-8, 1 - 1e-8, n_actions)
+    gumbel = log_prior - np.log(-np.log(u))
+
+    k = min(8, n_actions)
+    phases = max(1, int(np.log2(k)))
+
+    candidates = list(np.argsort(gumbel)[::-1][:k])
+    visits = np.zeros(n_actions, dtype=int)
+    total_q = np.zeros(n_actions)
+    remaining = budget
+
+    was_recording = env.record
+    env.record = False
+    for phase in range(phases):
+        k_phase = len(candidates)
+        b = remaining if phase == phases - 1 else remaining // (phases - phase)
+        spc = max(1, b // k_phase)
+        for a in candidates:
+            for _ in range(spc):
+                if remaining <= 0:
+                    break
+                _restore(env, root_state)
+                frac = env.step(a)
+                visits[a] += 1
+                total_q[a] += frac
+                remaining -= 1
+        if phase < phases - 1 and len(candidates) > 1:
+            mean_q = np.array([total_q[a] / visits[a] if visits[a] > 0 else 0.0
+                               for a in candidates])
+            g = np.array([gumbel[a] for a in candidates])
+            scores = mean_q + g
+            half = max(1, len(candidates) // 2)
+            top = np.argsort(scores)[::-1][:half]
+            candidates = [candidates[i] for i in top]
+    env.record = was_recording
+
+    # Final selection: among survivors, pick by mean_q + gumbel score
+    # (not just mean_q, which breaks ties arbitrarily when all actions score 0)
+    final_scores = np.full(n_actions, -np.inf)
+    for a in candidates:
+        mq = total_q[a] / visits[a] if visits[a] > 0 else 0.0
+        final_scores[a] = mq + gumbel[a]
+    return int(np.argmax(final_scores))
 
 
 def _restore(env, state):
@@ -274,26 +335,6 @@ def _restore(env, state):
     raw.block.angular_velocity = 0
 
 
-_gumbel_phase_action = 0
-
-def _gumbel_select(scores, counts, budget, n_actions):
-    """Simple Gumbel sequential halving for flat bandit."""
-    global _gumbel_phase_action
-    total = int(counts.sum())
-    if total == 0:
-        # First call: initialize Gumbel perturbations
-        u = np.random.uniform(1e-8, 1 - 1e-8, n_actions)
-        log_prior = np.full(n_actions, np.log(1.0 / n_actions))
-        _gumbel_select._gumbel = log_prior - np.log(-np.log(u))
-        _gumbel_select._candidates = list(np.argsort(_gumbel_select._gumbel)[::-1])
-        _gumbel_select._phase = 0
-
-    candidates = _gumbel_select._candidates
-    # Round-robin through current candidates
-    idx = total % len(candidates)
-    return candidates[idx]
-
-
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -302,28 +343,33 @@ def main():
     p.add_argument("--n-macros", type=int, default=15)
     p.add_argument("--budget", type=int, default=32)
     p.add_argument("--gap-size", type=int, default=200)
+    p.add_argument("--no-prior", action="store_true",
+                   help="Skip diffusion policy, use uniform prior")
     p.add_argument("--no-gif", action="store_true")
     args = p.parse_args()
 
     out_dir = os.path.dirname(os.path.abspath(__file__))
     record = not args.no_gif
 
+    policy = None if args.no_prior else _load_policy()
+
     print(f"\n{'='*60}")
     print(f" PushT Wall Gap  |  gap={args.gap_size}px  budget={args.budget}")
     print(f" seed={args.seed}  n_macros={args.n_macros}")
+    print(f" prior={'uniform' if policy is None else 'diffusion'}")
     print(f"{'='*60}\n")
 
     print("── PUCT ──")
     np.random.seed(args.seed)
     env_p = WallGapEnv(gap_size=args.gap_size, seed=args.seed, record=record)
-    fracs_p = run_episode(env_p, "puct", args.n_macros, args.budget)
+    fracs_p = run_episode(env_p, "puct", args.n_macros, args.budget, policy)
     frames_p = list(env_p.frames)
     env_p.close()
 
     print(f"\n── Gumbel ──")
     np.random.seed(args.seed + 1)
     env_g = WallGapEnv(gap_size=args.gap_size, seed=args.seed, record=record)
-    fracs_g = run_episode(env_g, "gumbel", args.n_macros, args.budget)
+    fracs_g = run_episode(env_g, "gumbel", args.n_macros, args.budget, policy)
     frames_g = list(env_g.frames)
     env_g.close()
 

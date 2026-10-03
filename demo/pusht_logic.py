@@ -196,11 +196,37 @@ class PushTLogic:
 # ── MCTSModel ─────────────────────────────────────────────────────────────────
 
 class PushTModel:
-    """Uniform prior + simulator IoU as value."""
+    """Diffusion prior (or uniform fallback) + simulator IoU as value."""
 
     def __init__(self, logic, diffusion_policy=None):
         self.logic = logic
         self.policy = diffusion_policy
+        self._obs_history = []
+
+    def reset_obs_history(self):
+        self._obs_history = []
+
+    def _compute_prior_from_board(self, board_np):
+        """Compute diffusion prior from a board state [agent_x, agent_y, block_x, block_y, angle]."""
+        from pusht import _compute_prior, _macro_targets
+        env = _get_env()
+        _restore_state(env, board_np)
+        raw = env.unwrapped
+
+        obs = {
+            "environment_state": _keypoints(raw.block).flatten().astype(np.float32),
+            "agent_pos": np.array(raw.agent.position, dtype=np.float32),
+        }
+        if not self._obs_history:
+            self._obs_history.append(obs)
+
+        prior_8 = _compute_prior(self.policy, raw, self._obs_history)
+        # Extend to 9 actions (add no-op with low weight)
+        prior = np.ones(NUM_ACTIONS, dtype=np.float32)
+        prior[:NUM_PUSH_DIRS] = prior_8
+        prior[NUM_PUSH_DIRS] = 0.02
+        prior /= prior.sum()
+        return prior
 
     def forward_for_mcts(self, batch):
         B = batch["boards"].shape[0]
@@ -211,11 +237,15 @@ class PushTModel:
 
         env = _get_env()
         for b in range(B):
-            policy_out[b, :NUM_ACTIONS] = 1.0 / NUM_ACTIONS
-            # Restore state and get actual IoU from the simulator
             board_np = boards[b].numpy().astype(np.float64)
             _restore_state(env, board_np)
             value_out[b] = env.unwrapped._get_coverage()
+
+            if self.policy is not None:
+                prior = self._compute_prior_from_board(board_np)
+                policy_out[b] = torch.from_numpy(prior)
+            else:
+                policy_out[b] = 1.0 / NUM_ACTIONS
 
         return {"policy": policy_out, "value": value_out}
 

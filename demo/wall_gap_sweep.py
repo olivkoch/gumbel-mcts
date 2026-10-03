@@ -25,6 +25,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 from pusht_wall import WallGapEnv, run_episode
+from pusht import _load_policy
 
 
 def main():
@@ -33,8 +34,12 @@ def main():
     p.add_argument("--gaps", type=int, nargs="+", default=[100, 150, 200])
     p.add_argument("--seeds", type=int, default=30)
     p.add_argument("--n-macros", type=int, default=15)
+    p.add_argument("--no-prior", action="store_true",
+                   help="Skip diffusion policy, use uniform prior")
     p.add_argument("--results-dir", type=str, default="demo")
     args = p.parse_args()
+
+    policy = None if args.no_prior else _load_policy()
 
     seeds = [int(s * 137 + 42) for s in range(args.seeds)]
     results = {}
@@ -59,14 +64,14 @@ def main():
                 # PUCT
                 np.random.seed(seed)
                 env_p = WallGapEnv(gap_size=gap, seed=seed, record=False)
-                fracs_p = run_episode(env_p, "puct", args.n_macros, budget)
+                fracs_p = run_episode(env_p, "puct", args.n_macros, budget, policy)
                 fp = fracs_p[-1]
                 env_p.close()
 
                 # Gumbel
                 np.random.seed(seed + 1)
                 env_g = WallGapEnv(gap_size=gap, seed=seed, record=False)
-                fracs_g = run_episode(env_g, "gumbel", args.n_macros, budget)
+                fracs_g = run_episode(env_g, "gumbel", args.n_macros, budget, policy)
                 fg = fracs_g[-1]
                 env_g.close()
 
