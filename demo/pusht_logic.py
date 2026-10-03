@@ -1,10 +1,11 @@
 """
 PushT wrapped as a GameLogic for the gumbel_mcts library.
 
-The physics sim (pymunk) can't be numba-compiled, so this module provides:
-  - PushTLogic: GameLogic protocol with a Python-callable fast_step
-  - PushTModel: MCTSModel that returns diffusion prior + zero value
-  - PythonPUCT / PythonGumbelDense: subclasses that use pure-Python kernels
+Micro-action design: 17 touch points × 3 push directions + no-op = 52 actions.
+Each action moves the agent a small step toward a contact point on the T-block,
+pushing in the specified direction (inward, tangent CW, tangent CCW).
+
+Value: 0 if the block didn't move, IoU if it did, IoU if already ≥ 0.80.
 """
 
 import os
@@ -21,47 +22,13 @@ import gym_pusht  # noqa: F401
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-APPROACH_DIST = 60
-PUSH_DEPTH    = 30
-N_APPROACH    = 8
-N_PUSH        = 12
-N_SETTLE      = 8
+STEP_SIZE     = 25        # pixels per micro-action push
+N_PHYSICS     = 10        # physics steps per micro-action
+SUCCESS_IOU   = 0.80      # IoU threshold above which no-op keeps value
 
 WORKSPACE_LO, WORKSPACE_HI = 0.0, 512.0
 
-# ── Fine push points along the T perimeter ───────────────────────────────────
-# Distribute contact points every ~30px along each edge of the T-block.
-# Each point pushes orthogonally inward (toward COG direction, same as before).
-
-_T_EDGES = [
-    ((-60, 0), (60, 0)),      # bar top (120px)
-    ((60, 0), (60, 30)),      # bar right (30px)
-    ((60, 30), (15, 30)),     # bar-stem right step (45px)
-    ((15, 30), (15, 120)),    # stem right (90px)
-    ((15, 120), (-15, 120)),  # stem bottom (30px)
-    ((-15, 120), (-15, 30)),  # stem left (90px)
-    ((-15, 30), (-60, 30)),   # bar-stem left step (45px)
-    ((-60, 30), (-60, 0)),    # bar left (30px)
-]
-_PUSH_SPACING = 30.0
-
-def _build_push_points():
-    import math
-    pts = []
-    for (x1, y1), (x2, y2) in _T_EDGES:
-        dx, dy = x2 - x1, y2 - y1
-        length = math.sqrt(dx**2 + dy**2)
-        n = max(1, int(round(length / _PUSH_SPACING)))
-        for i in range(n):
-            t = (i + 0.5) / n
-            pts.append((x1 + t * dx, y1 + t * dy))
-    return np.array(pts, dtype=np.float64)
-
-LOCAL_PUSH_POINTS = _build_push_points()
-NUM_PUSH_DIRS = len(LOCAL_PUSH_POINTS) * 3   # 3 directions per point (inward, tangent CW, tangent CCW)
-NUM_ACTIONS   = NUM_PUSH_DIRS + 1             # push directions + no-op
-
-# ── Goal geometry (for adaptive push + value) ────────────────────────────────
+# ── T-block geometry ─────────────────────────────────────────────────────────
 
 LOCAL_VERTS = np.array([
     [-60, 0], [60, 0], [60, 30], [-60, 30],
@@ -78,7 +45,38 @@ def _goal_keypoints():
 
 GOAL_KP = _goal_keypoints()
 
-# ── Shared environment pool (one per thread) ──────────────────────────────────
+# ── Touch points along the T perimeter ───────────────────────────────────────
+
+_T_EDGES = [
+    ((-60, 0), (60, 0)),      # bar top (120px)
+    ((60, 0), (60, 30)),      # bar right (30px)
+    ((60, 30), (15, 30)),     # bar-stem right step (45px)
+    ((15, 30), (15, 120)),    # stem right (90px)
+    ((15, 120), (-15, 120)),  # stem bottom (30px)
+    ((-15, 120), (-15, 30)),  # stem left (90px)
+    ((-15, 30), (-60, 30)),   # bar-stem left step (45px)
+    ((-60, 30), (-60, 0)),    # bar left (30px)
+]
+
+def _build_touch_points():
+    import math
+    pts = []
+    for (x1, y1), (x2, y2) in _T_EDGES:
+        dx, dy = x2 - x1, y2 - y1
+        length = math.sqrt(dx**2 + dy**2)
+        n = max(1, int(round(length / 30.0)))
+        for i in range(n):
+            t = (i + 0.5) / n
+            pts.append((x1 + t * dx, y1 + t * dy))
+    return np.array(pts, dtype=np.float64)
+
+LOCAL_TOUCH_POINTS = _build_touch_points()       # (17, 2)
+N_TOUCH    = len(LOCAL_TOUCH_POINTS)              # 17
+N_DIRS     = 3                                     # inward, tangent CW, tangent CCW
+NUM_PUSH_DIRS = N_TOUCH * N_DIRS                  # 51
+NUM_ACTIONS   = NUM_PUSH_DIRS + 1                 # 52 (51 pushes + no-op)
+
+# ── Shared environment pool ──────────────────────────────────────────────────
 
 _envs = {}
 
@@ -102,41 +100,6 @@ def _keypoints(block):
     return np.vstack(pts)
 
 
-def _macro_targets(raw_env):
-    """Compute approach and push-end points for all fine push actions.
-
-    For each surface point we generate 3 push directions:
-      - inward (toward COG): translates the block
-      - tangent CW: rotates the block clockwise
-      - tangent CCW: rotates the block counter-clockwise
-    Total actions = len(LOCAL_PUSH_POINTS) * 3 + 1 (no-op).
-    """
-    block = raw_env.block
-    angle = block.angle
-    bx, by = block.position
-    c, s = np.cos(angle), np.sin(angle)
-    R = np.array([[c, -s], [s, c]])
-    world_pts = (R @ LOCAL_PUSH_POINTS.T).T + np.array([bx, by])
-    cog = (R @ LOCAL_VERTS.T).T.mean(axis=0) + np.array([bx, by])
-
-    all_approach = []
-    all_push_end = []
-    for pt in world_pts:
-        d = pt - cog
-        outward = d / max(np.linalg.norm(d), 1e-6)
-        # Tangent directions (perpendicular to outward)
-        tangent_cw = np.array([outward[1], -outward[0]])
-        tangent_ccw = np.array([-outward[1], outward[0]])
-
-        for direction in [outward, tangent_cw, tangent_ccw]:
-            app = np.clip(pt + APPROACH_DIST * direction, WORKSPACE_LO, WORKSPACE_HI)
-            end = np.clip(pt - PUSH_DEPTH * direction, WORKSPACE_LO, WORKSPACE_HI)
-            all_approach.append(app)
-            all_push_end.append(end)
-
-    return np.array(all_approach), np.array(all_push_end)
-
-
 def _restore_state(env, board):
     raw = env.unwrapped
     raw.agent.position = [float(board[0]), float(board[1])]
@@ -148,14 +111,10 @@ def _restore_state(env, board):
 
 
 def _read_state(env):
-    raw = env.unwrapped
-    return np.array(raw.get_obs(), dtype=np.float64)
+    return np.array(env.unwrapped.get_obs(), dtype=np.float64)
 
-
-# ── fast_step (Python-callable, not njit) ─────────────────────────────────────
 
 def _keypoint_dist_to_goal(board):
-    """Compute mean keypoint distance from board state (no pymunk needed)."""
     bx, by, angle = board[2], board[3], board[4]
     c, s = np.cos(angle), np.sin(angle)
     R = np.array([[c, -s], [s, c]])
@@ -163,54 +122,97 @@ def _keypoint_dist_to_goal(board):
     return float(np.mean(np.linalg.norm(cur_kp - GOAL_KP, axis=1)))
 
 
+# ── Compute push targets ────────────────────────────────────────────────────
+
+def _compute_push_targets(raw_env):
+    """For each of 51 push actions, compute the agent target position.
+
+    Returns (51, 2) array of agent target positions.
+    """
+    block = raw_env.block
+    angle = block.angle
+    bx, by = block.position
+    c, s = np.cos(angle), np.sin(angle)
+    R = np.array([[c, -s], [s, c]])
+
+    world_pts = (R @ LOCAL_TOUCH_POINTS.T).T + np.array([bx, by])
+    cog = (R @ LOCAL_VERTS.T).T.mean(axis=0) + np.array([bx, by])
+
+    targets = []
+    for pt in world_pts:
+        d = pt - cog
+        outward = d / max(np.linalg.norm(d), 1e-6)
+        tangent_cw = np.array([outward[1], -outward[0]])
+        tangent_ccw = np.array([-outward[1], outward[0]])
+
+        for direction in [outward, tangent_cw, tangent_ccw]:
+            # Agent target: slightly past the touch point, pushing inward
+            agent_target = pt + direction * STEP_SIZE
+            targets.append(np.clip(agent_target, WORKSPACE_LO, WORKSPACE_HI))
+
+    return np.array(targets)
+
+
+# ── fast_step ────────────────────────────────────────────────────────────────
+
+def _block_moved(board_before, board_after, threshold=0.5):
+    dx = abs(board_after[2] - board_before[2])
+    dy = abs(board_after[3] - board_before[3])
+    da = abs(board_after[4] - board_before[4])
+    return (dx + dy) > threshold or da > 0.01
+
+
 def _pusht_fast_step(board, action, player):
-    """Execute one macro-action. Modifies board in-place. Returns (reward, winner, done, board)."""
     action = int(action)
-
-    if action == NUM_PUSH_DIRS:
-        env = _get_env()
-        _restore_state(env, board)
-        cov = env.unwrapped._get_coverage()
-        return float(cov), 0, False, board
-
     env = _get_env()
     _restore_state(env, board)
-
     raw = env.unwrapped
-    approach, push_end = _macro_targets(raw)
-    cov = 0.0
-    for target, n in [(approach[action], N_APPROACH),
-                      (push_end[action], N_PUSH),
-                      (push_end[action], N_SETTLE)]:
-        for _ in range(n):
-            _, _, _, _, info = env.step(target.astype(np.float32))
-            cov = info.get("coverage", 0.0)
-            # Clamp block to scene boundaries
+
+    iou_before = raw._get_coverage()
+    board_before = board.copy()
+
+    if action < NUM_PUSH_DIRS:
+        targets = _compute_push_targets(raw)
+        agent_target = targets[action].astype(np.float32)
+        for _ in range(N_PHYSICS):
+            env.step(agent_target)
             bx, by = raw.block.position
-            bx = max(60.0, min(452.0, bx))
-            by = max(60.0, min(452.0, by))
-            raw.block.position = (bx, by)
+            raw.block.position = (max(60, min(452, bx)), max(60, min(452, by)))
 
     new_state = _read_state(env)
     board[:] = new_state
+    iou_after = raw._get_coverage()
 
-    return float(cov), 0, False, board
+    # Value logic:
+    # - If block didn't move: 0 (discard useless actions)
+    # - If block moved: IoU + distance-based shaping
+    # - If IoU already at success: IoU (reward maintaining)
+    if iou_before >= SUCCESS_IOU:
+        value = iou_after
+    elif not _block_moved(board_before, board):
+        value = 0.0
+    else:
+        kp_dist = _keypoint_dist_to_goal(board)
+        dist_score = max(0.0, 1.0 - kp_dist / 200.0)  # [0, 1] normalized
+        value = max(iou_after, dist_score * 0.4)  # IoU when close, distance when far
+
+    return float(value), 0, False, board
 
 
 def _pusht_valid_mask(board, player):
     return np.ones(NUM_ACTIONS, dtype=np.float32)
 
 
-# ── GameLogic ─────────────────────────────────────────────────────────────────
+# ── GameLogic ────────────────────────────────────────────────────────────────
 
 class PushTLogic:
-    NUM_ACTIONS     = NUM_ACTIONS       # 0-7 push directions + 8 no-op
-    BOARD_SHAPE     = (5,)              # [agent_x, agent_y, block_x, block_y, block_angle]
+    NUM_ACTIONS     = NUM_ACTIONS
+    BOARD_SHAPE     = (5,)
     BOARD_DTYPE     = np.float64
-    MAX_MOVES       = 20
+    MAX_MOVES       = 200
     MAX_LEGAL_MOVES = NUM_ACTIONS
     PLAYER_1        = 1
-    PLAYER_2        = 1                 # same as P1 (single-player)
+    PLAYER_2        = 1
 
     fast_step      = staticmethod(_pusht_fast_step)
     get_valid_mask = staticmethod(_pusht_valid_mask)
@@ -232,10 +234,10 @@ class PushTLogic:
         return self._initial_board.copy()
 
 
-# ── MCTSModel ─────────────────────────────────────────────────────────────────
+# ── MCTSModel ────────────────────────────────────────────────────────────────
 
 class PushTModel:
-    """Diffusion prior (or uniform fallback) + simulator IoU as value."""
+    """Diffusion prior + IoU value."""
 
     def __init__(self, logic, diffusion_policy=None):
         self.logic = logic
@@ -245,49 +247,9 @@ class PushTModel:
     def reset_obs_history(self):
         self._obs_history = []
 
-    def _compute_prior_from_board(self, board_np):
-        """Compute diffusion prior over fine push actions.
-
-        The diffusion model predicts a (x,y) target. We score each push
-        action's push_end by proximity to that target, then softmax.
-        """
-        from pusht import _compute_prior as _compute_prior_8
-        env = _get_env()
-        _restore_state(env, board_np)
-        raw = env.unwrapped
-
-        obs = {
-            "environment_state": _keypoints(raw.block).flatten().astype(np.float32),
-            "agent_pos": np.array(raw.agent.position, dtype=np.float32),
-        }
-        if not self._obs_history:
-            self._obs_history.append(obs)
-
-        # Get the predicted (x,y) target from the diffusion model
-        target = self._get_diffusion_target(raw)
-        if target is None:
-            return np.full(NUM_ACTIONS, 1.0 / NUM_ACTIONS, dtype=np.float32)
-
-        # The diffusion model predicts a trajectory of agent positions.
-        # Score each action by how close its approach point is to the
-        # trajectory endpoint (where the agent is heading).
-        approach, _ = _macro_targets(raw)
-        dists = np.linalg.norm(approach - target, axis=1)
-        temperature = 0.05
-        logits = -dists / (temperature * 512.0)
-        logits -= logits.max()
-        probs = np.exp(logits)
-        prior = np.ones(NUM_ACTIONS, dtype=np.float32)
-        prior[:NUM_PUSH_DIRS] = probs
-        prior[NUM_PUSH_DIRS] = 0.02
-        prior /= prior.sum()
-        return prior
-
     def _get_diffusion_target(self, raw_env):
-        """Run diffusion model, return predicted (x,y) target or None."""
         if self.policy is None:
             return None
-        import torch
         history = self._obs_history[-2:] if len(self._obs_history) >= 2 else [self._obs_history[0]] * 2
         env_states = np.stack([h["environment_state"] for h in history])
         agent_poss = np.stack([h["agent_pos"] for h in history])
@@ -314,7 +276,7 @@ class PushTModel:
                 a_min = ns["unnormalize_outputs.buffer_action.min"].to(dev)
                 a_max = ns["unnormalize_outputs.buffer_action.max"].to(dev)
                 actions = (actions + 1) / 2 * (a_max - a_min) + a_min
-            return actions[0, -1].cpu().numpy()
+            return actions[0, -1].cpu().numpy()  # trajectory endpoint
         except Exception:
             return None
 
@@ -329,33 +291,44 @@ class PushTModel:
         for b in range(B):
             board_np = boards[b].numpy().astype(np.float64)
             _restore_state(env, board_np)
-            value_out[b] = env.unwrapped._get_coverage()
+            raw = env.unwrapped
+            iou = raw._get_coverage()
+            value_out[b] = iou
 
-            if self.policy is not None:
-                prior = self._compute_prior_from_board(board_np)
-                policy_out[b] = torch.from_numpy(prior)
+            if self.policy is not None and self._obs_history:
+                target = self._get_diffusion_target(raw)
+                if target is not None:
+                    targets = _compute_push_targets(raw)
+                    dists = np.linalg.norm(targets - target, axis=1)
+                    logits = -dists / (0.05 * 512.0)
+                    logits -= logits.max()
+                    probs = np.exp(logits)
+                    prior = np.zeros(NUM_ACTIONS, dtype=np.float32)
+                    prior[:NUM_PUSH_DIRS] = probs
+                    prior[NUM_PUSH_DIRS] = 0.02  # small no-op weight
+                    prior /= prior.sum()
+                    policy_out[b] = torch.from_numpy(prior)
+                else:
+                    policy_out[b] = 1.0 / NUM_ACTIONS
             else:
                 policy_out[b] = 1.0 / NUM_ACTIONS
 
         return {"policy": policy_out, "value": value_out}
 
 
-# ── Python-kernel PUCT / GumbelDense subclasses ───────────────────────────────
+# ── Python-kernel PUCT / GumbelDense subclasses ─────────────────────────────
 
 from gumbel_mcts.puct import PUCT, PUCTStorage
 from gumbel_mcts.gumbel_dense import GumbelDense
 
 
 class PythonPUCT(PUCT):
-    """PUCT using pure-Python kernels (for environments with Python-only fast_step)."""
-
     def run_simulation_batch(self, model, active_games, num_simulations=50,
                              c_puct_base=19652, c_puct_init=1.25):
         from kernels.python_kernels import select_leaves_batch, backpropagate_batch
         game_indices = np.array(active_games, dtype=np.int32)
         logic = self.logic
 
-        # Pre-expand roots
         unexpanded = [self.storage.root_indices[g]
                       for g in active_games
                       if not self.storage.is_expanded[self.storage.root_indices[g]]]
@@ -409,7 +382,6 @@ class PythonPUCT(PUCT):
                 max_game_depth=logic.MAX_MOVES
             )
 
-            # Evaluate leaves
             is_term = self.storage.is_terminal[leaf_indices]
             leaf_values = np.zeros(len(leaf_indices), dtype=np.float64)
             if np.any(is_term):
@@ -436,36 +408,28 @@ class PythonPUCT(PUCT):
 
 
 class PythonGumbelDense(GumbelDense):
-    """GumbelDense using pure-Python single-player kernels."""
-
     def _expand_roots_v4(self, model, active_games):
         from kernels.python_kernels import backpropagate_batch
         n_active = len(active_games)
         root_indices = self.storage.root_indices[active_games]
-
         obs_boards = torch.tensor(self.storage.boards[root_indices],
                                   device=self.device, dtype=torch.float32)
         obs_players = torch.tensor(self.storage.players[root_indices],
                                    device=self.device, dtype=torch.long)
         batch = {"boards": obs_boards.flatten(1), "current_player": obs_players}
-
         with torch.no_grad():
             outputs = model.forward_for_mcts(batch)
-
         probs = outputs['policy'].float().cpu().numpy()
         vals = outputs['value'].float().cpu().numpy().flatten().astype(np.float64)
-
         self.storage.prior_probs[root_indices] = probs
         self.root_logits[:n_active] = np.log(probs + 1e-10)
         self.root_nn_values[:n_active] = vals.astype(np.float32)
-
         logic = model.logic
         for i in range(n_active):
             r_idx = root_indices[i]
             self.root_legal_masks[i] = logic.get_valid_mask(
                 self.storage.boards[r_idx], self.storage.players[r_idx]
             )
-
         self.storage.is_expanded[root_indices] = True
         backpropagate_batch(root_indices, vals,
                             self.storage.parents, self.storage.visit_counts,
@@ -475,10 +439,8 @@ class PythonGumbelDense(GumbelDense):
         from kernels.python_kernels import backpropagate_batch
         is_term = self.storage.is_terminal[leaf_indices]
         leaf_values = np.zeros(len(leaf_indices), dtype=np.float64)
-
         if np.any(is_term):
             leaf_values[is_term] = self.storage.terminal_values[leaf_indices[is_term]]
-
         non_term = ~is_term
         if np.any(non_term):
             nn_idx = leaf_indices[non_term]
@@ -492,7 +454,6 @@ class PythonGumbelDense(GumbelDense):
             self.storage.is_expanded[nn_idx] = True
             self.storage.prior_probs[nn_idx] = priors
             leaf_values[non_term] = vals
-
         backpropagate_batch(leaf_indices, leaf_values,
                             self.storage.parents, self.storage.visit_counts,
                             self.storage.values)
@@ -505,10 +466,8 @@ class PythonGumbelDense(GumbelDense):
         game_indices = np.array(active_games, dtype=np.int32)
         logic = model.logic
         n_active = len(active_games)
-
         self._expand_roots_v4(model, active_games)
 
-        # Entropy-based dynamic max_k
         root_idxs = self.storage.root_indices[game_indices]
         raw_probs = self.storage.prior_probs[root_idxs].astype(np.float64)
         legal_f = self.root_legal_masks[:n_active].astype(np.float64)
@@ -537,14 +496,12 @@ class PythonGumbelDense(GumbelDense):
         num_phases = max(1, int(np.log2(k_initial)))
 
         candidate_mask = self._get_initial_gumbel_candidates(logic, game_indices, k_initial)
-
         remaining = num_simulations
         for phase in range(num_phases):
             k_phase = max(1, k_initial // (2 ** phase))
             phases_left = num_phases - phase
             budget_this_phase = remaining if phase == num_phases - 1 else remaining // phases_left
             sims_per_action = max(1, budget_this_phase // k_phase)
-
             for candidate_rank in range(k_phase):
                 root_moves = get_forced_root_moves_kernel(
                     n_active, candidate_mask, candidate_rank
@@ -567,9 +524,7 @@ class PythonGumbelDense(GumbelDense):
                         self.c_visit, self.c_scale
                     )
                     self._evaluate_and_backprop_v3(model, leaf_indices)
-
             remaining -= (k_phase * sims_per_action)
-
             if phase < num_phases - 1:
                 candidate_mask = self._halve_candidates_py(
                     game_indices, candidate_mask, get_gumbel_score_kernel
@@ -593,8 +548,7 @@ class PythonGumbelDense(GumbelDense):
         for i in range(n_active):
             active_moves = np.where(candidate_mask[i])[0]
             if len(active_moves) <= 1:
-                new_mask[i] = candidate_mask[i]
-                continue
+                new_mask[i] = candidate_mask[i]; continue
             num_to_keep = max(1, len(active_moves) // 2)
             row_scores = scores[i, active_moves]
             top_indices = np.argsort(row_scores)[-num_to_keep:]
