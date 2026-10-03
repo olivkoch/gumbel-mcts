@@ -1,20 +1,14 @@
 """
 demo/car_parking.py  —  Reeds-Shepp car parking: PUCT vs Gumbel under tight budgets.
 
-A simplified Reeds-Shepp car must reach a marked parking spot on a 10×10 discrete
-grid.  At tight simulation budgets Gumbel's sequential halving reliably outperforms
+A Reeds-Shepp car must reach a marked parking spot on a 16×16 discrete grid
+with 16 headings (22.5° steps).  The car can park front-first or rear-first
+with ±1 heading tolerance.  Going off-grid or hitting an obstacle is a crash.
+
+At tight simulation budgets Gumbel's sequential halving reliably outperforms
 PUCT's UCB exploration: Gumbel quickly prunes clearly-bad actions and concentrates
 its budget on the most promising candidates, while PUCT spreads sims uniformly via
 UCB and can't build a deep-enough tree in the same budget.
-
-Why Gumbel wins here
---------------------
-  * At budget ≤ 8, PUCT's UCB exploration term dominates the tiny Q-value
-    differences between actions, so it explores all arms roughly equally and
-    never commits to the right one.
-  * Gumbel's sequential halving discards clearly-bad arms after the first phase
-    and gives the survivors several more evaluations — enough for the value
-    function to differentiate between them.
 
 Outputs
 -------
@@ -46,23 +40,27 @@ from gumbel_mcts import PUCT, GumbelDense
 
 # ── World constants ───────────────────────────────────────────────────────────
 
-GRID     = 10   # cells per side
-N_ANGLES = 8    # 45° steps; angle 0 = east, increases counter-clockwise
+GRID     = 16   # cells per side
+N_ANGLES = 16   # 22.5° steps; angle 0 = east, increases counter-clockwise
 
-# Unit step for each of the 8 headings
-DX = np.array([ 1,  1,  0, -1, -1, -1,  0,  1], dtype=np.int8)
-DY = np.array([ 0,  1,  1,  1,  0, -1, -1, -1], dtype=np.int8)
+# Unit step for each of the 16 headings (round to nearest cell)
+_angles = np.arange(N_ANGLES) * 2 * np.pi / N_ANGLES
+DX = np.round(np.cos(_angles)).astype(np.int8)
+DY = np.round(np.sin(_angles)).astype(np.int8)
 
 # Action encoding: MOVE_SIGN[a] = ±1 (fwd/bwd), MOVE_DTHETA[a] = turn step
 MOVE_SIGN   = np.array([ 1,  1,  1, -1, -1, -1], dtype=np.int8)
 MOVE_DTHETA = np.array([ 0,  1, -1,  0, -1,  1], dtype=np.int8)
 
-START = np.array([1, 1, 0], dtype=np.int8)   # bottom-left, heading east
-GOAL  = np.array([7, 7, 2], dtype=np.int8)   # near top-right, heading north
+START = np.array([2, 2, 0], dtype=np.int8)    # bottom-left, heading east
+GOAL  = np.array([12, 12, 4], dtype=np.int8)  # near top-right, heading north
 
-# Parking-bay walls: three cells that enclose the spot on west, east, and north.
-# The entrance is open to the south — the car must approach from below going north.
-OBSTACLES = np.array([[6, 7], [8, 7], [7, 8]], dtype=np.int8)
+# Parking bay: walls on west, east, north of the goal; entrance from south.
+# Additional obstacle block to force routing.
+OBSTACLES = np.array([
+    [11, 12], [13, 12], [12, 13],   # bay walls
+    [7, 7], [7, 8], [8, 7],         # central obstacle
+], dtype=np.int8)
 
 
 # ── Numba-compiled game functions ─────────────────────────────────────────────
@@ -113,9 +111,16 @@ def fast_step(board, action, player):
     board[2] = theta2
 
     if (np.int32(x2) == np.int32(GOAL[0]) and
-            np.int32(y2) == np.int32(GOAL[1]) and
-            np.int32(theta2) == np.int32(GOAL[2])):
-        return 1.0, np.int32(1), True, board
+            np.int32(y2) == np.int32(GOAL[1])):
+        goal_theta = np.int32(GOAL[2])
+        # Allow ±1 heading tolerance in either direction (front or rear)
+        reverse_theta = np.int32((goal_theta + N_ANGLES // 2) % N_ANGLES)
+        diff_fwd = min(abs(np.int32(theta2) - goal_theta),
+                       N_ANGLES - abs(np.int32(theta2) - goal_theta))
+        diff_rev = min(abs(np.int32(theta2) - reverse_theta),
+                       N_ANGLES - abs(np.int32(theta2) - reverse_theta))
+        if diff_fwd <= 1 or diff_rev <= 1:
+            return 1.0, np.int32(1), True, board
 
     return 0.0, np.int32(0), False, board
 
@@ -154,7 +159,7 @@ class CarParkingLogic:
 
     NUM_ACTIONS     = 7        # 0-5 car moves, 6 = pass (Player 2 only)
     BOARD_SHAPE     = (3,)    # [x, y, theta_idx]
-    MAX_MOVES       = 120     # counts both P1 and P2 plies; effective car depth = 60
+    MAX_MOVES       = 200     # counts both P1 and P2 plies; effective car depth = 100
     MAX_LEGAL_MOVES = 6
     PLAYER_1        = 1
     PLAYER_2        = 2
@@ -185,8 +190,13 @@ class CarModel:
 
         dx = boards[:, 0] - float(GOAL[0])
         dy = boards[:, 1] - float(GOAL[1])
-        da = (boards[:, 2] - float(GOAL[2])).abs()
-        da = torch.minimum(da, torch.tensor(N_ANGLES, dtype=torch.float) - da)
+        # Angle distance: min of forward and reverse alignment
+        da_fwd = (boards[:, 2] - float(GOAL[2])).abs()
+        da_fwd = torch.minimum(da_fwd, torch.tensor(N_ANGLES, dtype=torch.float) - da_fwd)
+        reverse_goal = float((int(GOAL[2]) + N_ANGLES // 2) % N_ANGLES)
+        da_rev = (boards[:, 2] - reverse_goal).abs()
+        da_rev = torch.minimum(da_rev, torch.tensor(N_ANGLES, dtype=torch.float) - da_rev)
+        da = torch.minimum(da_fwd, da_rev)
         dist = torch.sqrt(dx**2 + dy**2) + 0.3 * da   # (B,)
 
         # Negamax convention: model returns value from the CURRENT NODE'S
@@ -237,15 +247,10 @@ def run_episode(algo, num_sims, logic, model):
                 tree.run_simulation_batch(model, [0], num_simulations=num_sims)[0]
             )
 
-        _, _, done, board = logic.fast_step(board, action, 1)
+        reward, _, done, board = logic.fast_step(board, action, 1)
         traj.append(board.copy())
         if done:
-            success = (
-                int(board[0]) == int(GOAL[0])
-                and int(board[1]) == int(GOAL[1])
-                and int(board[2]) == int(GOAL[2])
-            )
-            return success, traj
+            return (reward > 0), traj
 
     return False, traj
 
@@ -401,7 +406,7 @@ def make_animation(logic, model, budget, seed, out_path, *, fair=False):
     quivers = []
     for ax, traj, color in zip(axes, trajs, colors):
         s = traj[0]
-        angle = s[2] * np.pi / 4
+        angle = s[2] * 2 * np.pi / N_ANGLES
         q = ax.quiver(
             s[0], s[1], np.cos(angle), np.sin(angle),
             color=color, scale=8, width=0.015,
@@ -413,7 +418,7 @@ def make_animation(logic, model, budget, seed, out_path, *, fair=False):
         for traj, color, q, ax in zip(trajs, colors, quivers, axes):
             idx = min(frame, len(traj) - 1)
             s   = traj[idx]
-            angle = s[2] * np.pi / 4
+            angle = s[2] * 2 * np.pi / N_ANGLES
             q.set_offsets([[float(s[0]), float(s[1])]])
             q.set_UVC(np.cos(angle), np.sin(angle))
             # Only draw a trail segment for genuinely new frames; when a
@@ -446,7 +451,7 @@ def main():
     ap.add_argument("--episodes",    type=int, default=40,
                     help="Episodes per budget point (default 40)")
     ap.add_argument("--seed",        type=int, default=42)
-    ap.add_argument("--budgets",     type=str, default="2,4,8,16,32")
+    ap.add_argument("--budgets",     type=str, default="4,8,16,32,64")
     ap.add_argument("--budget-anim", type=int, default=None,
                     help="Budget used for the trajectory animation (default: second-smallest in --budgets)")
     ap.add_argument("--out-plot",    type=str,
