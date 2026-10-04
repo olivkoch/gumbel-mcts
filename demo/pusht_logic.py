@@ -124,15 +124,14 @@ def _keypoint_dist_to_goal(board):
 
 # ── Compute push targets ────────────────────────────────────────────────────
 
-def _compute_push_targets(raw_env, step_size=None):
+def _compute_push_targets(raw_env):
     """For each of 51 push actions, compute the agent target position.
 
-    step_size scales linearly: BASE_STEP_SIZE at IoU=0, 0 at IoU=1.
+    Step size decays quadratically with IoU.
     Returns (51, 2) array of agent target positions.
     """
-    if step_size is None:
-        iou = raw_env._get_coverage()
-        step_size = BASE_STEP_SIZE * (1.0 - iou) ** 2
+    iou = raw_env._get_coverage()
+    step_size = BASE_STEP_SIZE * (1.0 - iou) ** 2
 
     block = raw_env.block
     angle = block.angle
@@ -188,14 +187,21 @@ def _pusht_fast_step(board, action, player):
     board[:] = new_state
     iou_after = raw._get_coverage()
 
-    # If block didn't move, mark as terminal with value=0.
-    # This prevents the tree from evaluating the child node's model value
-    # (which would be the same IoU as the parent, making the action look good).
     if not _block_moved(board_before, board):
-        return 0.0, 0, True, board  # terminal=True, value=0
-    kp_dist = _keypoint_dist_to_goal(board)
-    dist_score = max(0.0, 1.0 - kp_dist / 200.0)
-    value = max(iou_after, dist_score * 0.4)
+        # No-move: value=0 when far from goal (penalize wasted actions),
+        # but value=current IoU when near goal (reward holding position).
+        if iou_before >= 0.1:
+            return float(iou_before), 0, True, board
+        return 0.0, 0, True, board
+
+    # Value: use distance shaping only when IoU < 0.1 (block far from goal).
+    # Above 0.1, use raw IoU so regressions are clearly penalized.
+    if iou_after < 0.1:
+        kp_dist = _keypoint_dist_to_goal(board)
+        dist_score = max(0.0, 1.0 - kp_dist / 200.0)
+        value = max(iou_after, dist_score * 0.4)
+    else:
+        value = iou_after
     return float(value), 0, False, board
 
 
@@ -293,9 +299,12 @@ class PushTModel:
             _restore_state(env, board_np)
             raw = env.unwrapped
             iou = raw._get_coverage()
-            kp_dist = _keypoint_dist_to_goal(board_np)
-            dist_score = max(0.0, 1.0 - kp_dist / 200.0) * 0.4
-            value_out[b] = max(iou, dist_score)
+            if iou < 0.1:
+                kp_dist = _keypoint_dist_to_goal(board_np)
+                dist_score = max(0.0, 1.0 - kp_dist / 200.0) * 0.4
+                value_out[b] = max(iou, dist_score)
+            else:
+                value_out[b] = iou
 
             if self.policy is not None and self._obs_history:
                 target = self._get_diffusion_target(raw)
