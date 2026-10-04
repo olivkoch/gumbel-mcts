@@ -240,9 +240,10 @@ class PushTLogic:
 class PushTModel:
     """Diffusion prior + IoU value."""
 
-    def __init__(self, logic, diffusion_policy=None):
+    def __init__(self, logic, diffusion_policy=None, use_geometric_prior=True):
         self.logic = logic
         self.policy = diffusion_policy
+        self.use_geometric_prior = use_geometric_prior
         self._obs_history = []
 
     def reset_obs_history(self):
@@ -301,41 +302,36 @@ class PushTModel:
             else:
                 value_out[b] = iou
 
-            # Geometric prior: cosine similarity between
-            # (block COG → goal COG) and each push direction
-            block_pos = np.array([board_np[2], board_np[3]])
-            block_angle = board_np[4]
-            goal_pos = np.array([GOAL_POSE[0], GOAL_POSE[1]])
-            to_goal = goal_pos - block_pos
-            to_goal_norm = np.linalg.norm(to_goal)
-            if to_goal_norm > 1e-6:
-                to_goal /= to_goal_norm
-
-            c_a, s_a = np.cos(block_angle), np.sin(block_angle)
-            R = np.array([[c_a, -s_a], [s_a, c_a]])
-            world_pts = (R @ LOCAL_TOUCH_POINTS.T).T + block_pos
-            cog = (R @ LOCAL_VERTS.T).T.mean(axis=0) + block_pos
-
-            scores = np.zeros(NUM_PUSH_DIRS, dtype=np.float32)
-            for a in range(NUM_PUSH_DIRS):
-                pt = world_pts[a // 3]
-                d = pt - cog
-                outward = d / max(np.linalg.norm(d), 1e-6)
-                dir_idx = a % 3
-                if dir_idx == 0:
-                    push_dir = -outward
-                elif dir_idx == 1:
-                    push_dir = np.array([-outward[1], outward[0]])
-                else:
-                    push_dir = np.array([outward[1], -outward[0]])
-                scores[a] = np.dot(push_dir, to_goal)  # cosine similarity
-
-            scores -= scores.max()
-            prior = np.zeros(NUM_ACTIONS, dtype=np.float32)
-            prior[:NUM_PUSH_DIRS] = np.exp(scores * 1.0)
-            prior[NUM_PUSH_DIRS] = 0.1
-            prior /= prior.sum()
-            policy_out[b] = torch.from_numpy(prior)
+            if self.use_geometric_prior:
+                block_pos = np.array([board_np[2], board_np[3]])
+                block_angle = board_np[4]
+                goal_pos = np.array([GOAL_POSE[0], GOAL_POSE[1]])
+                to_goal = goal_pos - block_pos
+                to_goal_norm = np.linalg.norm(to_goal)
+                if to_goal_norm > 1e-6:
+                    to_goal /= to_goal_norm
+                c_a, s_a = np.cos(block_angle), np.sin(block_angle)
+                R = np.array([[c_a, -s_a], [s_a, c_a]])
+                world_pts = (R @ LOCAL_TOUCH_POINTS.T).T + block_pos
+                cog = (R @ LOCAL_VERTS.T).T.mean(axis=0) + block_pos
+                scores = np.zeros(NUM_PUSH_DIRS, dtype=np.float32)
+                for a in range(NUM_PUSH_DIRS):
+                    pt = world_pts[a // 3]
+                    d = pt - cog
+                    outward = d / max(np.linalg.norm(d), 1e-6)
+                    dir_idx = a % 3
+                    if dir_idx == 0: push_dir = -outward
+                    elif dir_idx == 1: push_dir = np.array([-outward[1], outward[0]])
+                    else: push_dir = np.array([outward[1], -outward[0]])
+                    scores[a] = np.dot(push_dir, to_goal)
+                scores -= scores.max()
+                prior = np.zeros(NUM_ACTIONS, dtype=np.float32)
+                prior[:NUM_PUSH_DIRS] = np.exp(scores * 1.0)
+                prior[NUM_PUSH_DIRS] = 0.1
+                prior /= prior.sum()
+                policy_out[b] = torch.from_numpy(prior)
+            else:
+                policy_out[b] = 1.0 / NUM_ACTIONS
 
 
         return {"policy": policy_out, "value": value_out}

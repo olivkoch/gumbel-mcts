@@ -28,12 +28,12 @@ def main():
     p.add_argument("--seeds", type=int, default=50)
     p.add_argument("--n-macros", type=int, default=10)
     p.add_argument("--no-prior", action="store_true",
-                   help="Skip diffusion policy, use uniform prior")
+                   help="Use uniform prior (no geometric, no diffusion)")
     args = p.parse_args()
 
-    policy = None if args.no_prior else _load_policy()
+    use_geo = not args.no_prior
     logic = PushTLogic()
-    model = PushTModel(logic, diffusion_policy=policy)
+    model = PushTModel(logic, use_geometric_prior=use_geo)
     seeds = [int(s * 137 + 42) for s in range(args.seeds)]
     results = {}
 
