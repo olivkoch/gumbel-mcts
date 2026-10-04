@@ -132,7 +132,7 @@ def _compute_push_targets(raw_env, step_size=None):
     """
     if step_size is None:
         iou = raw_env._get_coverage()
-        step_size = BASE_STEP_SIZE * (1.0 - iou)
+        step_size = BASE_STEP_SIZE * (1.0 - iou) ** 2
 
     block = raw_env.block
     angle = block.angle
@@ -178,7 +178,8 @@ def _pusht_fast_step(board, action, player):
     if action < NUM_PUSH_DIRS:
         targets = _compute_push_targets(raw)
         agent_target = targets[action].astype(np.float32)
-        for _ in range(N_PHYSICS):
+        n_steps = max(2, int(N_PHYSICS * (1.0 - iou_before) ** 2))
+        for _ in range(n_steps):
             env.step(agent_target)
             bx, by = raw.block.position
             raw.block.position = (max(60, min(452, bx)), max(60, min(452, by)))
