@@ -58,13 +58,12 @@ _T_EDGES = [
     ((-60, 30), (-60, 0)),    # bar left (30px)
 ]
 
+_EDGE_COUNTS = [3, 1, 1, 2, 1, 2, 1, 1]  # push points per edge
+
 def _build_touch_points():
-    import math
     pts = []
-    for (x1, y1), (x2, y2) in _T_EDGES:
+    for ((x1, y1), (x2, y2)), n in zip(_T_EDGES, _EDGE_COUNTS):
         dx, dy = x2 - x1, y2 - y1
-        length = math.sqrt(dx**2 + dy**2)
-        n = max(1, int(round(length / 30.0)))
         for i in range(n):
             t = (i + 0.5) / n
             pts.append((x1 + t * dx, y1 + t * dy))
@@ -188,10 +187,8 @@ def _pusht_fast_step(board, action, player):
     iou_after = raw._get_coverage()
 
     if not _block_moved(board_before, board):
-        # No-move: value=0 when far from goal (penalize wasted actions),
-        # but value=current IoU when near goal (reward holding position).
         if iou_before >= 0.1:
-            return float(iou_before), 0, True, board
+            return float(iou_before), 0, False, board
         return 0.0, 0, True, board
 
     # Value: use distance shaping only when IoU < 0.1 (block far from goal).

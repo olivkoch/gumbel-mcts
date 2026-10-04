@@ -62,8 +62,8 @@ def run_episode(algo, logic, model, num_sims, n_macros, record=False):
         else:
             tree = PythonGumbelDense(n_games=1, max_nodes=max_nodes,
                                      logic=logic, device="cpu",
-                                     max_considered_actions=16,
-                                     entropy_min_k=16)
+                                     max_considered_actions=logic.NUM_ACTIONS,
+                                     entropy_min_k=logic.NUM_ACTIONS)
             tree.initialize_roots([0], board[None], np.array([1]))
             action = int(
                 tree.run_simulation_batch(model, [0],
