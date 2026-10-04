@@ -22,7 +22,7 @@ import gym_pusht  # noqa: F401
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-BASE_STEP_SIZE = 25       # pixels per micro-action push at IoU=0
+BASE_STEP_SIZE = 10       # pixels per micro-action push
 N_PHYSICS      = 10       # physics steps per micro-action
 SUCCESS_IOU   = 0.80      # IoU threshold above which no-op keeps value
 
@@ -126,11 +126,9 @@ def _keypoint_dist_to_goal(board):
 def _compute_push_targets(raw_env):
     """For each of 51 push actions, compute the agent target position.
 
-    Step size decays quadratically with IoU.
-    Returns (51, 2) array of agent target positions.
+    Returns (N_PUSH_DIRS, 2) array of agent target positions.
     """
-    iou = raw_env._get_coverage()
-    step_size = BASE_STEP_SIZE * (1.0 - iou) ** 2
+    step_size = BASE_STEP_SIZE
 
     block = raw_env.block
     angle = block.angle
@@ -176,7 +174,7 @@ def _pusht_fast_step(board, action, player):
     if action < NUM_PUSH_DIRS:
         targets = _compute_push_targets(raw)
         agent_target = targets[action].astype(np.float32)
-        n_steps = max(2, int(N_PHYSICS * (1.0 - iou_before) ** 2))
+        n_steps = N_PHYSICS
         for _ in range(n_steps):
             env.step(agent_target)
             bx, by = raw.block.position
