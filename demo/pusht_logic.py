@@ -58,7 +58,7 @@ _T_EDGES = [
     ((-60, 30), (-60, 0)),    # bar left (30px)
 ]
 
-_EDGE_COUNTS = [3, 1, 1, 2, 1, 2, 1, 1]  # push points per edge
+_EDGE_COUNTS = [2, 0, 1, 1, 1, 1, 1, 0]  # push points per edge
 
 def _build_touch_points():
     pts = []
