@@ -1,9 +1,10 @@
 """
 Wall-gap PushT wrapped as a GameLogic for the gumbel_mcts library.
 
-Reuses PythonPUCT / PythonGumbelDense from pusht_logic.py.
-The wall enforcement (per-substep block rollback + agent clipping) is
-baked into fast_step so the tree search respects the constraint.
+Micro-action design matching pusht_logic.py:
+7 touch points × 3 push directions + no-op = 22 actions.
+Constant step_size=10px, N_PHYSICS=10.
+Wall enforcement via per-substep block rollback + agent clipping.
 """
 
 import os
@@ -20,9 +21,10 @@ import gymnasium as gym
 import gym_pusht  # noqa: F401
 
 from pusht_logic import (
-    NUM_PUSH_DIRS, NUM_ACTIONS, APPROACH_DIST, PUSH_DEPTH,
-    N_APPROACH, N_PUSH, N_SETTLE, WORKSPACE_LO, WORKSPACE_HI,
-    LOCAL_VERTS, _keypoints, PythonPUCT, PythonGumbelDense,
+    LOCAL_VERTS, LOCAL_TOUCH_POINTS, N_TOUCH, N_DIRS,
+    NUM_PUSH_DIRS, NUM_ACTIONS, BASE_STEP_SIZE, N_PHYSICS,
+    WORKSPACE_LO, WORKSPACE_HI,
+    _keypoints, PythonPUCT, PythonGumbelDense,
 )
 
 # ── Wall constants ───────────────────────────────────────────────────────────
@@ -46,13 +48,11 @@ def _get_wall_env(gap_size):
 
 
 def _setup_walls(env, gap_size):
-    """Add wall bodies to the pymunk space. Idempotent per env."""
     raw = env.unwrapped
     space = raw.block._space
     half = gap_size / 2
     wall_width = 30
 
-    # Remove old wall bodies if any
     for body in list(space.bodies):
         if getattr(body, '_is_wall', False):
             for shape in body.shapes:
@@ -85,8 +85,7 @@ def _restore_state(env, board):
 
 
 def _read_state(env):
-    raw = env.unwrapped
-    return np.array(raw.get_obs(), dtype=np.float64)
+    return np.array(env.unwrapped.get_obs(), dtype=np.float64)
 
 
 def _fraction_past_wall(board):
@@ -97,51 +96,69 @@ def _fraction_past_wall(board):
     return float(np.mean(kp[:, 0] > WALL_X))
 
 
-def _macro_targets(raw_env):
-    kp = _keypoints(raw_env.block)
-    face_pts = np.array([
-        (kp[0] + kp[1]) / 2, (kp[1] + kp[2]) / 2,
-        (kp[5] + kp[6]) / 2, (kp[3] + kp[0]) / 2,
-        kp[0], kp[1], kp[5], kp[6],
-    ])
-    cog = kp.mean(axis=0)
-    d = face_pts - cog
-    outward = d / np.linalg.norm(d, axis=1, keepdims=True).clip(min=1e-6)
-    approach = np.clip(face_pts + APPROACH_DIST * outward, WORKSPACE_LO, WORKSPACE_HI)
-    push_end = np.clip(face_pts - PUSH_DEPTH * outward, WORKSPACE_LO, WORKSPACE_HI)
-    return approach, push_end
+def _block_moved(board_before, board_after, threshold=0.5):
+    dx = abs(board_after[2] - board_before[2])
+    dy = abs(board_after[3] - board_before[3])
+    da = abs(board_after[4] - board_before[4])
+    return (dx + dy) > threshold or da > 0.01
+
+
+# ── Compute push targets (micro-actions) ─────────────────────────────────────
+
+def _compute_push_targets(raw_env):
+    step_size = BASE_STEP_SIZE
+    block = raw_env.block
+    angle = block.angle
+    bx, by = block.position
+    c, s = np.cos(angle), np.sin(angle)
+    R = np.array([[c, -s], [s, c]])
+
+    world_pts = (R @ LOCAL_TOUCH_POINTS.T).T + np.array([bx, by])
+    cog = (R @ LOCAL_VERTS.T).T.mean(axis=0) + np.array([bx, by])
+
+    targets = []
+    for pt in world_pts:
+        d = pt - cog
+        outward = d / max(np.linalg.norm(d), 1e-6)
+        tangent_cw = np.array([outward[1], -outward[0]])
+        tangent_ccw = np.array([-outward[1], outward[0]])
+        for direction in [outward, tangent_cw, tangent_ccw]:
+            agent_target = pt + direction * step_size
+            targets.append(np.clip(agent_target, WORKSPACE_LO, WORKSPACE_HI))
+
+    return np.array(targets)
 
 
 # ── fast_step with wall enforcement ──────────────────────────────────────────
 
 def _wall_gap_fast_step(board, action, player, gap_size=200):
     action = int(action)
-
     env = _get_wall_env(gap_size)
     _restore_state(env, board)
     raw = env.unwrapped
 
-    if action == NUM_PUSH_DIRS:
-        frac = _fraction_past_wall(board)
-        return float(frac), 0, False, board
+    frac_before = _fraction_past_wall(board)
+    board_before = board.copy()
 
-    agent_x_limit = WALL_X - 15 - 15
-    half = gap_size / 2
-    wall_left = WALL_X - 15
+    if action < NUM_PUSH_DIRS:
+        targets = _compute_push_targets(raw)
+        agent_target = targets[action].astype(np.float32)
 
-    approach, push_end = _macro_targets(raw)
-    for target, n in [(approach[action], N_APPROACH),
-                      (push_end[action], N_PUSH),
-                      (push_end[action], N_SETTLE)]:
-        clipped = target.copy()
-        clipped[0] = min(clipped[0], agent_x_limit)
-        for _ in range(n):
+        agent_x_limit = WALL_X - 15 - 15
+        half = gap_size / 2
+        wall_left = WALL_X - 15
+
+        for _ in range(N_PHYSICS):
             prev_pos = list(raw.block.position)
             prev_angle = raw.block.angle
 
-            env.step(clipped.astype(np.float32))
+            env.step(agent_target)
 
-            # Check block-wall overlap
+            # Block boundary clamp
+            bx, by = raw.block.position
+            raw.block.position = (max(60, min(452, bx)), max(60, min(452, by)))
+
+            # Wall violation check
             bx, by = raw.block.position
             ba = raw.block.angle
             c, s = np.cos(ba), np.sin(ba)
@@ -158,7 +175,7 @@ def _wall_gap_fast_step(board, action, player, gap_size=200):
                 raw.block.velocity = (0, 0)
                 raw.block.angular_velocity = 0
 
-            # Clamp agent
+            # Agent wall clamp
             ax, ay = raw.agent.position
             if ax > agent_x_limit:
                 in_gap = (GAP_CENTER_Y - half) < ay < (GAP_CENTER_Y + half)
@@ -167,8 +184,14 @@ def _wall_gap_fast_step(board, action, player, gap_size=200):
 
     new_state = _read_state(env)
     board[:] = new_state
-    frac = _fraction_past_wall(board)
-    return float(frac), 0, False, board
+    frac_after = _fraction_past_wall(board)
+
+    if not _block_moved(board_before, board):
+        if frac_before >= 0.1:
+            return float(frac_before), 0, False, board
+        return 0.0, 0, True, board
+
+    return float(frac_after), 0, False, board
 
 
 def _wall_gap_valid_mask(board, player):
@@ -181,7 +204,7 @@ class WallGapLogic:
     NUM_ACTIONS     = NUM_ACTIONS
     BOARD_SHAPE     = (5,)
     BOARD_DTYPE     = np.float64
-    MAX_MOVES       = 20
+    MAX_MOVES       = 200
     MAX_LEGAL_MOVES = NUM_ACTIONS
     PLAYER_1        = 1
     PLAYER_2        = 1
@@ -223,48 +246,22 @@ class WallGapLogic:
 # ── MCTSModel ────────────────────────────────────────────────────────────────
 
 class WallGapModel:
-    """Diffusion prior (or uniform) + fraction_past_wall as value."""
+    """Uniform prior + fraction_past_wall as value."""
 
-    def __init__(self, logic, diffusion_policy=None):
+    def __init__(self, logic):
         self.logic = logic
-        self.policy = diffusion_policy
-        self._obs_history = []
-
-    def reset_obs_history(self):
-        self._obs_history = []
-
-    def _compute_prior_from_board(self, board_np):
-        from pusht import _compute_prior, _keypoints as kp_fn
-        env = _get_wall_env(self.logic.gap_size)
-        _restore_state(env, board_np)
-        raw = env.unwrapped
-        obs = {
-            "environment_state": kp_fn(raw.block).flatten().astype(np.float32),
-            "agent_pos": np.array(raw.agent.position, dtype=np.float32),
-        }
-        if not self._obs_history:
-            self._obs_history.append(obs)
-        prior_8 = _compute_prior(self.policy, raw, self._obs_history)
-        prior = np.ones(NUM_ACTIONS, dtype=np.float32)
-        prior[:NUM_PUSH_DIRS] = prior_8
-        prior[NUM_PUSH_DIRS] = 0.02
-        prior /= prior.sum()
-        return prior
 
     def forward_for_mcts(self, batch):
         B = batch["boards"].shape[0]
-        boards = batch["boards"].float()
+        boards = batch["boards"].float().cpu()
 
         policy_out = torch.zeros(B, self.logic.NUM_ACTIONS)
         value_out = torch.zeros(B, 1)
 
         for b in range(B):
             board_np = boards[b].numpy().astype(np.float64)
-            value_out[b] = _fraction_past_wall(board_np)
-            if self.policy is not None:
-                prior = self._compute_prior_from_board(board_np)
-                policy_out[b] = torch.from_numpy(prior)
-            else:
-                policy_out[b] = 1.0 / NUM_ACTIONS
+            frac = _fraction_past_wall(board_np)
+            value_out[b] = frac
+            policy_out[b] = 1.0 / NUM_ACTIONS
 
         return {"policy": policy_out, "value": value_out}
