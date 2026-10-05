@@ -28,7 +28,7 @@ from wall_gap_logic import (
     WallGapLogic, WallGapModel, PythonPUCT, PythonGumbelDense,
     _get_wall_env, _restore_state, _fraction_past_wall, _keypoints,
 )
-from pusht import make_gif, _load_policy
+from pusht import make_gif
 
 
 def run_episode(algo, logic, model, num_sims, n_macros, record=False):
@@ -106,7 +106,7 @@ def run_episode(algo, logic, model, num_sims, n_macros, record=False):
 
 # ── Sweep mode ───────────────────────────────────────────────────────────────
 
-def run_sweep(args, policy):
+def run_sweep(args):
     seeds = [int(s * 137 + 42) for s in range(args.seeds)]
     results = {}
     total_runs = len(args.gaps) * len(args.budgets) * len(seeds) * 2
@@ -125,7 +125,7 @@ def run_sweep(args, policy):
                 t0 = time.perf_counter()
 
                 logic = WallGapLogic(gap_size=gap, seed=seed)
-                model = WallGapModel(logic, diffusion_policy=policy)
+                model = WallGapModel(logic)
 
                 np.random.seed(seed); torch.manual_seed(seed)
                 fp_list, _ = run_episode("puct", logic, model, budget, args.n_macros)
@@ -201,18 +201,16 @@ def main():
     p.add_argument("--results-dir", type=str, default="demo")
     args = p.parse_args()
 
-    policy = None if args.no_prior else _load_policy()
-
     if args.sweep:
-        run_sweep(args, policy)
+        run_sweep(args)
         return
 
     out_dir = os.path.dirname(os.path.abspath(__file__))
     logic = WallGapLogic(gap_size=args.gap_size, seed=args.seed)
-    model = WallGapModel(logic, diffusion_policy=policy)
+    model = WallGapModel(logic)
     record = not args.no_gif
 
-    prior_label = "uniform" if policy is None else "diffusion"
+    prior_label = "uniform"
     print(f"\n{'='*60}")
     print(f" Wall Gap (library)  |  gap={args.gap_size}px  budget={args.budget}")
     print(f" seed={args.seed}  n_macros={args.n_macros}  prior={prior_label}")
