@@ -320,9 +320,10 @@ class PushTModel:
                     d = pt - cog
                     outward = d / max(np.linalg.norm(d), 1e-6)
                     dir_idx = a % 3
-                    if dir_idx == 0: push_dir = -outward
-                    elif dir_idx == 1: push_dir = np.array([-outward[1], outward[0]])
-                    else: push_dir = np.array([outward[1], -outward[0]])
+                    # Block moves AWAY from agent (outward direction)
+                    if dir_idx == 0: push_dir = outward
+                    elif dir_idx == 1: push_dir = np.array([outward[1], -outward[0]])
+                    else: push_dir = np.array([-outward[1], outward[0]])
                     scores[a] = np.dot(push_dir, to_goal)
                 scores -= scores.max()
                 prior = np.zeros(NUM_ACTIONS, dtype=np.float32)
