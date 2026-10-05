@@ -3,7 +3,7 @@ Wall-gap PushT wrapped as a GameLogic for the gumbel_mcts library.
 
 Micro-action design matching pusht_logic.py:
 7 touch points × 3 push directions + no-op = 22 actions.
-Constant step_size=10px, N_PHYSICS=10.
+Reposition-then-push: agent teleports to approach point before pushing.
 Wall enforcement via per-substep block rollback + agent clipping.
 """
 
@@ -22,9 +22,9 @@ import gym_pusht  # noqa: F401
 
 from pusht_logic import (
     LOCAL_VERTS, LOCAL_TOUCH_POINTS, N_TOUCH, N_DIRS,
-    NUM_PUSH_DIRS, NUM_ACTIONS, BASE_STEP_SIZE, N_PHYSICS,
+    NUM_PUSH_DIRS, NUM_ACTIONS, BASE_STEP_SIZE, APPROACH_DIST, N_PHYSICS,
     WORKSPACE_LO, WORKSPACE_HI,
-    _keypoints, PythonPUCT, PythonGumbelDense,
+    _keypoints, _compute_push_targets, PythonPUCT, PythonGumbelDense,
 )
 
 # ── Wall constants ───────────────────────────────────────────────────────────
@@ -103,33 +103,7 @@ def _block_moved(board_before, board_after, threshold=0.5):
     return (dx + dy) > threshold or da > 0.01
 
 
-# ── Compute push targets (micro-actions) ─────────────────────────────────────
-
-def _compute_push_targets(raw_env):
-    step_size = BASE_STEP_SIZE
-    block = raw_env.block
-    angle = block.angle
-    bx, by = block.position
-    c, s = np.cos(angle), np.sin(angle)
-    R = np.array([[c, -s], [s, c]])
-
-    world_pts = (R @ LOCAL_TOUCH_POINTS.T).T + np.array([bx, by])
-    cog = (R @ LOCAL_VERTS.T).T.mean(axis=0) + np.array([bx, by])
-
-    targets = []
-    for pt in world_pts:
-        d = pt - cog
-        outward = d / max(np.linalg.norm(d), 1e-6)
-        tangent_cw = np.array([outward[1], -outward[0]])
-        tangent_ccw = np.array([-outward[1], outward[0]])
-        for direction in [outward, tangent_cw, tangent_ccw]:
-            agent_target = pt + direction * step_size
-            targets.append(np.clip(agent_target, WORKSPACE_LO, WORKSPACE_HI))
-
-    return np.array(targets)
-
-
-# ── fast_step with wall enforcement ──────────────────────────────────────────
+# ── fast_step with wall enforcement + reposition-then-push ───────────────────
 
 def _wall_gap_fast_step(board, action, player, gap_size=200):
     action = int(action)
@@ -141,9 +115,13 @@ def _wall_gap_fast_step(board, action, player, gap_size=200):
     board_before = board.copy()
 
     if action < NUM_PUSH_DIRS:
-        targets = _compute_push_targets(raw)
-        agent_target = targets[action].astype(np.float32)
+        approaches, push_targets = _compute_push_targets(raw)
 
+        # Reposition agent to approach point
+        raw.agent.position = list(approaches[action])
+        raw.agent.velocity = (0, 0)
+
+        target = push_targets[action].astype(np.float32)
         agent_x_limit = WALL_X - 15 - 15
         half = gap_size / 2
         wall_left = WALL_X - 15
@@ -152,7 +130,7 @@ def _wall_gap_fast_step(board, action, player, gap_size=200):
             prev_pos = list(raw.block.position)
             prev_angle = raw.block.angle
 
-            env.step(agent_target)
+            env.step(target)
 
             # Block boundary clamp
             bx, by = raw.block.position
@@ -246,10 +224,11 @@ class WallGapLogic:
 # ── MCTSModel ────────────────────────────────────────────────────────────────
 
 class WallGapModel:
-    """Uniform prior + fraction_past_wall as value."""
+    """Geometric prior (push toward wall gap) + fraction_past_wall as value."""
 
-    def __init__(self, logic):
+    def __init__(self, logic, use_geometric_prior=True):
         self.logic = logic
+        self.use_geometric_prior = use_geometric_prior
 
     def forward_for_mcts(self, batch):
         B = batch["boards"].shape[0]
@@ -262,6 +241,36 @@ class WallGapModel:
             board_np = boards[b].numpy().astype(np.float64)
             frac = _fraction_past_wall(board_np)
             value_out[b] = frac
-            policy_out[b] = 1.0 / NUM_ACTIONS
+
+            if self.use_geometric_prior:
+                env = _get_wall_env(self.logic.gap_size)
+                _restore_state(env, board_np)
+                raw = env.unwrapped
+
+                # Goal direction: push block toward the gap center
+                block_pos = np.array([board_np[2], board_np[3]])
+                # Target: gap center, on the far side of the wall
+                gap_target = np.array([WALL_X + 50, GAP_CENTER_Y])
+                to_goal = gap_target - block_pos
+                to_goal_norm = np.linalg.norm(to_goal)
+                if to_goal_norm > 1e-6:
+                    to_goal /= to_goal_norm
+
+                approaches, push_targets = _compute_push_targets(raw)
+                scores = np.zeros(NUM_PUSH_DIRS, dtype=np.float32)
+                for a in range(NUM_PUSH_DIRS):
+                    push_dir = push_targets[a] - approaches[a]
+                    pdn = np.linalg.norm(push_dir)
+                    if pdn > 1e-6:
+                        push_dir /= pdn
+                    scores[a] = np.dot(push_dir, to_goal)
+                scores -= scores.max()
+                prior = np.zeros(NUM_ACTIONS, dtype=np.float32)
+                prior[:NUM_PUSH_DIRS] = np.exp(scores * 1.0)
+                prior[NUM_PUSH_DIRS] = np.mean(prior[:NUM_PUSH_DIRS])
+                prior /= prior.sum()
+                policy_out[b] = torch.from_numpy(prior)
+            else:
+                policy_out[b] = 1.0 / NUM_ACTIONS
 
         return {"policy": policy_out, "value": value_out}

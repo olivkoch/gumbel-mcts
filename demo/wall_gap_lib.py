@@ -125,7 +125,7 @@ def run_sweep(args):
                 t0 = time.perf_counter()
 
                 logic = WallGapLogic(gap_size=gap, seed=seed)
-                model = WallGapModel(logic)
+                model = WallGapModel(logic, use_geometric_prior=not args.no_prior)
 
                 np.random.seed(seed); torch.manual_seed(seed)
                 fp_list, _ = run_episode("puct", logic, model, budget, args.n_macros)
@@ -207,10 +207,10 @@ def main():
 
     out_dir = os.path.dirname(os.path.abspath(__file__))
     logic = WallGapLogic(gap_size=args.gap_size, seed=args.seed)
-    model = WallGapModel(logic)
+    model = WallGapModel(logic, use_geometric_prior=not args.no_prior)
     record = not args.no_gif
 
-    prior_label = "uniform"
+    prior_label = "uniform" if args.no_prior else "geometric"
     print(f"\n{'='*60}")
     print(f" Wall Gap (library)  |  gap={args.gap_size}px  budget={args.budget}")
     print(f" seed={args.seed}  n_macros={args.n_macros}  prior={prior_label}")
