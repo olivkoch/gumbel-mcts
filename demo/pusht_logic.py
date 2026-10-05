@@ -303,28 +303,23 @@ class PushTModel:
                 value_out[b] = iou
 
             if self.use_geometric_prior:
+                agent_pos = np.array([board_np[0], board_np[1]])
                 block_pos = np.array([board_np[2], board_np[3]])
-                block_angle = board_np[4]
                 goal_pos = np.array([GOAL_POSE[0], GOAL_POSE[1]])
                 to_goal = goal_pos - block_pos
                 to_goal_norm = np.linalg.norm(to_goal)
                 if to_goal_norm > 1e-6:
                     to_goal /= to_goal_norm
-                c_a, s_a = np.cos(block_angle), np.sin(block_angle)
-                R = np.array([[c_a, -s_a], [s_a, c_a]])
-                world_pts = (R @ LOCAL_TOUCH_POINTS.T).T + block_pos
-                cog = (R @ LOCAL_VERTS.T).T.mean(axis=0) + block_pos
+                # Agent target for each action
+                targets = _compute_push_targets(raw)
                 scores = np.zeros(NUM_PUSH_DIRS, dtype=np.float32)
                 for a in range(NUM_PUSH_DIRS):
-                    pt = world_pts[a // 3]
-                    d = pt - cog
-                    outward = d / max(np.linalg.norm(d), 1e-6)
-                    dir_idx = a % 3
-                    # Block moves AWAY from agent (outward direction)
-                    if dir_idx == 0: push_dir = outward
-                    elif dir_idx == 1: push_dir = np.array([outward[1], -outward[0]])
-                    else: push_dir = np.array([-outward[1], outward[0]])
-                    scores[a] = np.dot(push_dir, to_goal)
+                    # Block moves in direction: agent → touch point
+                    agent_to_target = targets[a] - agent_pos
+                    atn = np.linalg.norm(agent_to_target)
+                    if atn > 1e-6:
+                        agent_to_target /= atn
+                    scores[a] = np.dot(agent_to_target, to_goal)
                 scores -= scores.max()
                 prior = np.zeros(NUM_ACTIONS, dtype=np.float32)
                 prior[:NUM_PUSH_DIRS] = np.exp(scores * 1.0)
