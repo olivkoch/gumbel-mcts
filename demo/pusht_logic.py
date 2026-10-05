@@ -323,7 +323,7 @@ class PushTModel:
                 scores -= scores.max()
                 prior = np.zeros(NUM_ACTIONS, dtype=np.float32)
                 prior[:NUM_PUSH_DIRS] = np.exp(scores * 1.0)
-                prior[NUM_PUSH_DIRS] = 0.1
+                prior[NUM_PUSH_DIRS] = np.mean(prior[:NUM_PUSH_DIRS])
                 prior /= prior.sum()
                 policy_out[b] = torch.from_numpy(prior)
             else:
