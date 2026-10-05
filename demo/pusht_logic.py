@@ -123,13 +123,15 @@ def _keypoint_dist_to_goal(board):
 
 # ── Compute push targets ────────────────────────────────────────────────────
 
+APPROACH_DIST = 30  # how far from touch point the agent starts
+
 def _compute_push_targets(raw_env):
-    """For each of 51 push actions, compute the agent target position.
+    """For each push action, compute approach position and push target.
 
-    Returns (N_PUSH_DIRS, 2) array of agent target positions.
+    Returns (approach, push_target) each (N_PUSH_DIRS, 2).
+    - approach: where to place the agent before pushing
+    - push_target: where the agent aims during the push
     """
-    step_size = BASE_STEP_SIZE
-
     block = raw_env.block
     angle = block.angle
     bx, by = block.position
@@ -139,7 +141,8 @@ def _compute_push_targets(raw_env):
     world_pts = (R @ LOCAL_TOUCH_POINTS.T).T + np.array([bx, by])
     cog = (R @ LOCAL_VERTS.T).T.mean(axis=0) + np.array([bx, by])
 
-    targets = []
+    approaches = []
+    push_targets = []
     for pt in world_pts:
         d = pt - cog
         outward = d / max(np.linalg.norm(d), 1e-6)
@@ -147,10 +150,14 @@ def _compute_push_targets(raw_env):
         tangent_ccw = np.array([-outward[1], outward[0]])
 
         for direction in [outward, tangent_cw, tangent_ccw]:
-            agent_target = pt + direction * step_size
-            targets.append(np.clip(agent_target, WORKSPACE_LO, WORKSPACE_HI))
+            # Agent starts outside the block along the push direction
+            approach = np.clip(pt + direction * APPROACH_DIST, WORKSPACE_LO, WORKSPACE_HI)
+            # Agent pushes toward the opposite side (through the touch point)
+            push_target = np.clip(pt - direction * BASE_STEP_SIZE, WORKSPACE_LO, WORKSPACE_HI)
+            approaches.append(approach)
+            push_targets.append(push_target)
 
-    return np.array(targets)
+    return np.array(approaches), np.array(push_targets)
 
 
 # ── fast_step ────────────────────────────────────────────────────────────────
@@ -172,11 +179,14 @@ def _pusht_fast_step(board, action, player):
     board_before = board.copy()
 
     if action < NUM_PUSH_DIRS:
-        targets = _compute_push_targets(raw)
-        agent_target = targets[action].astype(np.float32)
-        n_steps = N_PHYSICS
-        for _ in range(n_steps):
-            env.step(agent_target)
+        approaches, push_targets = _compute_push_targets(raw)
+        # Reposition agent to approach point (instant)
+        raw.agent.position = list(approaches[action])
+        raw.agent.velocity = (0, 0)
+        # Push toward target
+        target = push_targets[action].astype(np.float32)
+        for _ in range(N_PHYSICS):
+            env.step(target)
             bx, by = raw.block.position
             raw.block.position = (max(60, min(452, bx)), max(60, min(452, by)))
 
@@ -310,16 +320,15 @@ class PushTModel:
                 to_goal_norm = np.linalg.norm(to_goal)
                 if to_goal_norm > 1e-6:
                     to_goal /= to_goal_norm
-                # Agent target for each action
-                targets = _compute_push_targets(raw)
+                approaches, push_targets = _compute_push_targets(raw)
                 scores = np.zeros(NUM_PUSH_DIRS, dtype=np.float32)
                 for a in range(NUM_PUSH_DIRS):
-                    # Block moves in direction: agent → touch point
-                    agent_to_target = targets[a] - agent_pos
-                    atn = np.linalg.norm(agent_to_target)
-                    if atn > 1e-6:
-                        agent_to_target /= atn
-                    scores[a] = np.dot(agent_to_target, to_goal)
+                    # Block moves in direction: approach → push_target
+                    push_dir = push_targets[a] - approaches[a]
+                    pdn = np.linalg.norm(push_dir)
+                    if pdn > 1e-6:
+                        push_dir /= pdn
+                    scores[a] = np.dot(push_dir, to_goal)
                 scores -= scores.max()
                 prior = np.zeros(NUM_ACTIONS, dtype=np.float32)
                 prior[:NUM_PUSH_DIRS] = np.exp(scores * 1.0)
