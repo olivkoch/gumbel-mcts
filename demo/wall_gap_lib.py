@@ -98,6 +98,9 @@ def run_episode(algo, logic, model, num_sims, n_macros, record=False):
         print(f"[{algo:6s}] step {step+1}/{n_macros} | action={action} | "
               f"frac={frac:.3f} | plan={dt:.2f}s")
 
+        if frac >= 0.95:
+            break
+
     if record and 'rec_env' in dir():
         rec_env.close()
 
@@ -147,10 +150,10 @@ def run_sweep(args):
             results[gap][budget] = {
                 "puct_mean": float(np.mean(pa)),
                 "puct_std": float(np.std(pa)),
-                "puct_success": float(np.mean(pa >= 0.5)),
+                "puct_success": float(np.mean(pa >= 0.95)),
                 "gumbel_mean": float(np.mean(ga)),
                 "gumbel_std": float(np.std(ga)),
-                "gumbel_success": float(np.mean(ga >= 0.5)),
+                "gumbel_success": float(np.mean(ga >= 0.95)),
             }
             r = results[gap][budget]
             print(f"\n  PUCT:   mean={r['puct_mean']:.3f}±{r['puct_std']:.3f}  "
@@ -164,7 +167,7 @@ def run_sweep(args):
     print(f"\nResults saved to {out_path}")
 
     print(f"\n{'='*80}")
-    print(f" SUMMARY — fraction past wall (mean ± std) / success rate (frac ≥ 0.5)")
+    print(f" SUMMARY — fraction past wall (mean ± std) / success rate (frac ≥ 0.95)")
     print(f"{'='*80}")
     for gap in args.gaps:
         print(f"\n  Gap = {gap}px")

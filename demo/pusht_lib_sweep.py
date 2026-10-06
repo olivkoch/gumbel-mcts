@@ -19,7 +19,7 @@ from pusht_logic import PushTLogic, PushTModel
 from pusht_lib import run_episode
 from pusht import _load_policy
 
-SUCCESS_THRESHOLD = 0.40
+SUCCESS_THRESHOLD = 0.80
 
 
 def main():

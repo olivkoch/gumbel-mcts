@@ -95,6 +95,9 @@ def run_episode(algo, logic, model, num_sims, n_macros, record=False):
         print(f"[{algo:6s}] step {step+1}/{n_macros} | action={action} | "
               f"IoU={cov:.3f} | plan={dt:.2f}s")
 
+        if cov >= 0.80:
+            break
+
     if record and 'rec_env' in dir():
         rec_env.close()
 
