@@ -34,7 +34,6 @@ from pusht import make_gif
 def run_episode(algo, logic, model, num_sims, n_macros, record=False):
     """Run one episode. Returns (fracs, frames)."""
     logic.reset()
-    model.reset_obs_history()
     board = logic.get_initial_board()
     max_nodes = max(num_sims * 8 + 100, 400)
 
@@ -82,14 +81,6 @@ def run_episode(algo, logic, model, num_sims, n_macros, record=False):
         frac = _fraction_past_wall(board)
         fracs.append(frac)
 
-        # Update obs history for diffusion prior
-        env = _get_wall_env(logic.gap_size)
-        _restore_state(env, board)
-        raw_env = env.unwrapped
-        model._obs_history.append({
-            "environment_state": _keypoints(raw_env.block).flatten().astype(np.float32),
-            "agent_pos": np.array(raw_env.agent.position, dtype=np.float32),
-        })
 
         if record:
             _restore_state(rec_env, board)
