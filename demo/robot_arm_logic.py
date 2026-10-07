@@ -25,10 +25,7 @@ WORKSPACE    = 512
 NUM_ACTIONS  = N_JOINTS * 2 + 1  # 9 actions
 SUCCESS_DIST = 15.0  # pixels
 
-# Target is fixed to the right of the base
-TARGET_POS   = np.array([400.0, 256.0])
-
-# Two obstacles straddling the direct path from base to target
+# Two obstacles between base and typical target locations
 OBSTACLES = [
     (270, 248, 22),
     (330, 264, 22),
@@ -196,8 +193,29 @@ class RobotArmLogic:
     def reset(self, seed=None):
         if seed is not None:
             self.seed = seed
+        rng = np.random.default_rng(self.seed)
         self._initial_board = np.zeros(N_JOINTS + 2, dtype=np.float64)
-        self._initial_board[N_JOINTS:N_JOINTS+2] = TARGET_POS
+        # Random initial joint angles (±45°)
+        while True:
+            angles = rng.uniform(-np.pi/4, np.pi/4, N_JOINTS)
+            if not has_collision(angles):
+                break
+        self._initial_board[:N_JOINTS] = angles
+        # Random target within reachable workspace, not inside obstacles
+        max_reach = LINK_LENGTHS.sum()
+        while True:
+            angle = rng.uniform(0, 2 * np.pi)
+            dist = rng.uniform(80, max_reach * 0.85)
+            target = BASE_POS + np.array([np.cos(angle), np.sin(angle)]) * dist
+            if not (30 < target[0] < WORKSPACE - 30 and 30 < target[1] < WORKSPACE - 30):
+                continue
+            in_obs = False
+            for cx, cy, r in OBSTACLES:
+                if np.sqrt((target[0]-cx)**2 + (target[1]-cy)**2) < r + 20:
+                    in_obs = True; break
+            if not in_obs:
+                break
+        self._initial_board[N_JOINTS:N_JOINTS+2] = target
 
     def get_initial_board(self):
         if self._initial_board is None:
