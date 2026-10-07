@@ -29,9 +29,9 @@ PUCT (left) vs Gumbel (right) on four tasks — same simulation budget, same mod
 </a>
 </td>
 <td align="center" width="50%">
-<b>Wall-gap PushT</b> — push through a narrow gap<br>
-<a href="https://github.com/olivkoch/gumbel-mcts/blob/main/demo/mp4/final_wallgap.mp4">
-<img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/demo/gif/final_wallgap.gif" width="100%" alt="Wall-gap: PUCT frac=0.00 vs Gumbel frac=0.75" />
+<b>Wall-gap PushT</b> — push through a narrow gap, 64 sims<br>
+<a href="https://github.com/olivkoch/gumbel-mcts/blob/main/demo/mp4/final_wallgap_sims64.mp4">
+<img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/demo/gif/final_wallgap_sims64.gif" width="100%" alt="Wall-gap: PUCT frac=0.50 vs Gumbel frac=1.00" />
 </a>
 </td>
 </tr>
