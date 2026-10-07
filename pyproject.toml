@@ -16,16 +16,18 @@ dependencies = [
     "numpy",
     "torch",
     "numba",
-    "matplotlib>=3.10.8",
-    "pillow>=12.1.1",
-    "wandb>=0.30.0",
-    "gymnasium>=1.4.0",
-    "gym-pusht>=0.1.6",
-    "pymunk<7",
 ]
 
 [project.optional-dependencies]
 test = ["pytest", "pytest-cov"]
+demo = [
+    "matplotlib",
+    "pillow",
+    "gymnasium",
+    "gym-pusht",
+    "pymunk<7",
+    "wandb",
+]
 
 [[tool.uv.index]]
 url = "https://socket-registry.mistralai.com/pypi/simple/"
