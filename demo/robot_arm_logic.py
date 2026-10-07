@@ -25,11 +25,8 @@ WORKSPACE    = 512
 NUM_ACTIONS  = N_JOINTS * 2 + 1  # 9 actions
 SUCCESS_DIST = 15.0  # pixels
 
-# Two obstacles between base and typical target locations
-OBSTACLES = [
-    (270, 248, 22),
-    (330, 264, 22),
-]
+# Obstacles are placed dynamically between base and target (see reset)
+OBSTACLES = []
 
 # ── Forward kinematics ──────────────────────────────────────────────────────
 
@@ -164,7 +161,7 @@ def _arm_fast_step(board, action, player):
     # Distance to target
     ee = end_effector(angles)
     dist = np.linalg.norm(ee - target)
-    value = max(0.0, 1.0 - dist / 300.0)
+    value = max(0.0, 1.0 - dist / 500.0)
 
     done = dist < SUCCESS_DIST
     return float(value), int(done), done, board
@@ -193,29 +190,36 @@ class RobotArmLogic:
     def reset(self, seed=None):
         if seed is not None:
             self.seed = seed
+        global OBSTACLES
         rng = np.random.default_rng(self.seed)
         self._initial_board = np.zeros(N_JOINTS + 2, dtype=np.float64)
-        # Random initial joint angles (±45°)
-        while True:
-            angles = rng.uniform(-np.pi/4, np.pi/4, N_JOINTS)
-            if not has_collision(angles):
-                break
-        self._initial_board[:N_JOINTS] = angles
-        # Random target within reachable workspace, not inside obstacles
+
+        # Random target: reachable, within workspace
         max_reach = LINK_LENGTHS.sum()
         while True:
             angle = rng.uniform(0, 2 * np.pi)
-            dist = rng.uniform(80, max_reach * 0.85)
+            dist = rng.uniform(100, max_reach * 0.75)
             target = BASE_POS + np.array([np.cos(angle), np.sin(angle)]) * dist
-            if not (30 < target[0] < WORKSPACE - 30 and 30 < target[1] < WORKSPACE - 30):
-                continue
-            in_obs = False
-            for cx, cy, r in OBSTACLES:
-                if np.sqrt((target[0]-cx)**2 + (target[1]-cy)**2) < r + 20:
-                    in_obs = True; break
-            if not in_obs:
+            if 40 < target[0] < WORKSPACE - 40 and 40 < target[1] < WORKSPACE - 40:
                 break
         self._initial_board[N_JOINTS:N_JOINTS+2] = target
+
+        # Place 2 obstacles along the line between base and target
+        direction = target - BASE_POS
+        perp = np.array([-direction[1], direction[0]])
+        perp /= max(np.linalg.norm(perp), 1e-6)
+        obs = []
+        for t_frac, offset in [(0.35, 12), (0.6, -12)]:
+            center = BASE_POS + direction * t_frac + perp * offset
+            obs.append((float(center[0]), float(center[1]), 15.0))
+        OBSTACLES = obs
+
+        # Random initial joint angles (±30°), must not collide
+        while True:
+            angles = rng.uniform(-np.pi/6, np.pi/6, N_JOINTS)
+            if not has_collision(angles):
+                break
+        self._initial_board[:N_JOINTS] = angles
 
     def get_initial_board(self):
         if self._initial_board is None:
@@ -243,7 +247,7 @@ class RobotArmModel:
 
             ee = end_effector(angles)
             dist = np.linalg.norm(ee - target)
-            value_out[b] = max(0.0, 1.0 - dist / 300.0)
+            value_out[b] = max(0.0, 1.0 - dist / 500.0)
             policy_out[b] = 1.0 / NUM_ACTIONS
 
         return {"policy": policy_out, "value": value_out}
