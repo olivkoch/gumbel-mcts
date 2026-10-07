@@ -24,6 +24,11 @@ WORKSPACE    = 512
 NUM_ACTIONS  = N_JOINTS * 2 + 1  # 7: j0+, j0-, j1+, j1-, j2+, j2-, noop
 SUCCESS_DIST = 15.0  # pixels
 
+# Obstacles: list of (center_x, center_y, radius)
+OBSTACLES = [
+    (310, 210, 20),
+]
+
 # ── Forward kinematics ──────────────────────────────────────────────────────
 
 def forward_kinematics(angles):
@@ -57,13 +62,36 @@ def segments_intersect(p1, p2, p3, p4):
     return 0.01 < t < 0.99 and 0.01 < u < 0.99
 
 
-def has_self_collision(angles):
-    """Check if any non-adjacent links intersect."""
+def segment_circle_intersect(p1, p2, center, radius):
+    """Check if segment p1-p2 intersects circle (center, radius)."""
+    d = p2 - p1
+    f = p1 - center
+    a = np.dot(d, d)
+    b = 2 * np.dot(f, d)
+    c = np.dot(f, f) - radius * radius
+    disc = b * b - 4 * a * c
+    if disc < 0:
+        return False
+    disc = np.sqrt(disc)
+    t1 = (-b - disc) / (2 * a)
+    t2 = (-b + disc) / (2 * a)
+    return (0 <= t1 <= 1) or (0 <= t2 <= 1) or (t1 < 0 and t2 > 1)
+
+
+def has_collision(angles):
+    """Check self-collision and obstacle collision."""
     positions = forward_kinematics(angles)
+    # Self-collision
     for i in range(N_JOINTS):
         for j in range(i + 2, N_JOINTS):
             if segments_intersect(positions[i], positions[i+1],
                                   positions[j], positions[j+1]):
+                return True
+    # Obstacle collision
+    for i in range(N_JOINTS):
+        for cx, cy, r in OBSTACLES:
+            if segment_circle_intersect(positions[i], positions[i+1],
+                                        np.array([cx, cy]), r):
                 return True
     return False
 
@@ -79,6 +107,10 @@ def render(angles, target):
     for i in range(0, WORKSPACE, 64):
         draw.line([(i, 0), (i, WORKSPACE)], fill=(230, 230, 230), width=1)
         draw.line([(0, i), (WORKSPACE, i)], fill=(230, 230, 230), width=1)
+
+    # Obstacles
+    for cx, cy, r in OBSTACLES:
+        draw.ellipse([cx-r, cy-r, cx+r, cy+r], fill=(180, 180, 180), outline=(120, 120, 120), width=2)
 
     # Target
     tx, ty = int(target[0]), int(target[1])
@@ -121,8 +153,8 @@ def _arm_fast_step(board, action, player):
         new_angle = np.clip(new_angle, -ANGLE_LIMIT, ANGLE_LIMIT)
         angles[joint] = new_angle
 
-    # Check self-collision
-    if has_self_collision(angles):
+    # Check collisions (self + obstacles)
+    if has_collision(angles):
         return 0.0, 0, True, board  # terminal, bad
 
     board[:N_JOINTS] = angles
@@ -166,7 +198,14 @@ class RobotArmLogic:
             angle = rng.uniform(0, 2 * np.pi)
             dist = rng.uniform(50, max_reach * 0.9)
             target = BASE_POS + np.array([np.cos(angle), np.sin(angle)]) * dist
-            if 20 < target[0] < WORKSPACE - 20 and 20 < target[1] < WORKSPACE - 20:
+            if not (20 < target[0] < WORKSPACE - 20 and 20 < target[1] < WORKSPACE - 20):
+                continue
+            # Don't place target inside an obstacle
+            in_obs = False
+            for cx, cy, r in OBSTACLES:
+                if np.sqrt((target[0]-cx)**2 + (target[1]-cy)**2) < r + 20:
+                    in_obs = True; break
+            if not in_obs:
                 break
         self._initial_board = np.zeros(5, dtype=np.float64)
         self._initial_board[N_JOINTS:N_JOINTS+2] = target
