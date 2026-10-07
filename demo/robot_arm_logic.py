@@ -1,11 +1,12 @@
 """
-2D robotic arm with 3 joints — GameLogic for gumbel_mcts library.
+2D robotic arm with 4 joints — GameLogic for gumbel_mcts library.
 
-The arm has a fixed base, 3 links, and must reach a target point.
+The arm has a fixed base, 4 links, and must reach a target point
+while navigating around obstacles placed between the base and target.
 Joint angles are capped to [-90°, +90°]. Self-collision is penalized.
 
-Action space: 3 joints × 2 directions (±step) + no-op = 7 actions.
-Board state: [j0, j1, j2, target_x, target_y] (angles in radians).
+Action space: 4 joints × 2 directions (±step) + no-op = 9 actions.
+Board state: [j0, j1, j2, j3, target_x, target_y] (angles in radians).
 """
 
 import numpy as np
@@ -14,19 +15,23 @@ from PIL import Image, ImageDraw
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-LINK_LENGTHS = np.array([100.0, 80.0, 60.0])
-N_JOINTS     = 3
+LINK_LENGTHS = np.array([80.0, 70.0, 60.0, 50.0])
+N_JOINTS     = 4
 ANGLE_STEP   = np.radians(10)  # 10° per action
 ANGLE_LIMIT  = np.radians(90)  # ±90° per joint
-BASE_POS     = np.array([256.0, 256.0])
+BASE_POS     = np.array([150.0, 256.0])
 WORKSPACE    = 512
 
-NUM_ACTIONS  = N_JOINTS * 2 + 1  # 7: j0+, j0-, j1+, j1-, j2+, j2-, noop
+NUM_ACTIONS  = N_JOINTS * 2 + 1  # 9 actions
 SUCCESS_DIST = 15.0  # pixels
 
-# Obstacles: list of (center_x, center_y, radius)
+# Target is fixed to the right of the base
+TARGET_POS   = np.array([400.0, 256.0])
+
+# Two obstacles straddling the direct path from base to target
 OBSTACLES = [
-    (310, 210, 20),
+    (270, 248, 22),
+    (330, 264, 22),
 ]
 
 # ── Forward kinematics ──────────────────────────────────────────────────────
@@ -118,7 +123,7 @@ def render(angles, target):
 
     # Arm
     positions = forward_kinematics(angles)
-    link_colors = [(70, 130, 200), (50, 110, 180), (30, 90, 160)]
+    link_colors = [(70, 130, 200), (50, 110, 180), (30, 90, 160), (20, 70, 140)]
     for i in range(N_JOINTS):
         x1, y1 = int(positions[i][0]), int(positions[i][1])
         x2, y2 = int(positions[i+1][0]), int(positions[i+1][1])
@@ -174,7 +179,7 @@ def _arm_valid_mask(board, player):
 
 class RobotArmLogic:
     NUM_ACTIONS     = NUM_ACTIONS
-    BOARD_SHAPE     = (5,)  # [j0, j1, j2, target_x, target_y]
+    BOARD_SHAPE     = (N_JOINTS + 2,)  # [j0..j3, target_x, target_y]
     BOARD_DTYPE     = np.float64
     MAX_MOVES       = 100
     MAX_LEGAL_MOVES = NUM_ACTIONS
@@ -191,24 +196,8 @@ class RobotArmLogic:
     def reset(self, seed=None):
         if seed is not None:
             self.seed = seed
-        rng = np.random.default_rng(self.seed)
-        # Random target within reachable workspace
-        max_reach = LINK_LENGTHS.sum()
-        while True:
-            angle = rng.uniform(0, 2 * np.pi)
-            dist = rng.uniform(50, max_reach * 0.9)
-            target = BASE_POS + np.array([np.cos(angle), np.sin(angle)]) * dist
-            if not (20 < target[0] < WORKSPACE - 20 and 20 < target[1] < WORKSPACE - 20):
-                continue
-            # Don't place target inside an obstacle
-            in_obs = False
-            for cx, cy, r in OBSTACLES:
-                if np.sqrt((target[0]-cx)**2 + (target[1]-cy)**2) < r + 20:
-                    in_obs = True; break
-            if not in_obs:
-                break
-        self._initial_board = np.zeros(5, dtype=np.float64)
-        self._initial_board[N_JOINTS:N_JOINTS+2] = target
+        self._initial_board = np.zeros(N_JOINTS + 2, dtype=np.float64)
+        self._initial_board[N_JOINTS:N_JOINTS+2] = TARGET_POS
 
     def get_initial_board(self):
         if self._initial_board is None:
