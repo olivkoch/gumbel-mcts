@@ -109,7 +109,7 @@ def main():
     ap.add_argument("--n-eval",     type=int, default=20)
     ap.add_argument("--seed",       type=int, default=0)
     ap.add_argument("--out",        type=str,
-                    default="demo/sokoban_sim_sweep.png")
+                    default="demo/png/sokoban_sim_sweep.png")
     args = ap.parse_args()
 
     print("Sokoban — simulation budget sweep: Gumbel vs PUCT")

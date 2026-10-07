@@ -5,7 +5,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-OUT = "demo/pusht_results_table.png"
+OUT = "demo/png/pusht_results_table.png"
 
 SURFACE = "#fcfcfb"
 TEXT_PRIMARY = "#0b0b0b"

@@ -155,7 +155,7 @@ if __name__ == "__main__":
     print(f"\nRecording Gumbel...")
     frames_g, frac_g = record_episode("gumbel", policy)
 
-    gif_path = os.path.join(OUT_DIR, "final_wallgap_sims64.gif")
+    gif_path = os.path.join(OUT_DIR, "gif", "final_wallgap_sims64.gif")
     make_gif(frames_p, frames_g,
              f"PUCT  frac={frac_p:.2f}",
              f"Gumbel  frac={frac_g:.2f}",

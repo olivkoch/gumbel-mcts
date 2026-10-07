@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 LOG = Path(__file__).parent.parent / "logs" / "pusht-sweep-22990492.out"
-OUT = Path(__file__).parent / "pusht_sweep_results.png"
+OUT = Path(__file__).parent / "png" / "pusht_sweep_results.png"
 
 # ── Parse log ─────────────────────────────────────────────────────────────────
 

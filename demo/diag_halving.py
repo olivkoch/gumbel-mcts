@@ -148,7 +148,7 @@ def main():
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--episodes", type=int, default=100)
-    ap.add_argument("--out", type=str, default="demo/diag_halving.png")
+    ap.add_argument("--out", type=str, default="demo/png/diag_halving.png")
     args = ap.parse_args()
 
     logic = Gomoku9Logic()

@@ -576,7 +576,7 @@ def main():
     print(f"{'='*60}\n")
 
     if record:
-        gif_path = os.path.join(out_dir, "pusht_comparison.gif")
+        gif_path = os.path.join(out_dir, "gif", "pusht_comparison.gif")
         label_a = f"{args.strategy_a}  IoU={covs_a[-1]:.2f}"
         label_b = f"{args.strategy_b}  IoU={covs_b[-1]:.2f}"
         make_gif(frames_a, frames_b, label_a, label_b, gif_path, fps=15)

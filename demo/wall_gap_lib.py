@@ -152,7 +152,7 @@ def run_sweep(args):
             print(f"  Gumbel: mean={r['gumbel_mean']:.3f}±{r['gumbel_std']:.3f}  "
                   f"success={r['gumbel_success']:.1%}")
 
-    out_path = os.path.join(args.results_dir, "wall_gap_lib_sweep_results.json")
+    out_path = os.path.join(args.results_dir, "json", "wall_gap_lib_sweep_results.json")
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\nResults saved to {out_path}")
@@ -227,7 +227,7 @@ def main():
     print(f"{'='*60}\n")
 
     if record and frames_p and frames_g:
-        gif_path = os.path.join(out_dir, f"wall_gap_lib_{args.gap_size}.gif")
+        gif_path = os.path.join(out_dir, "gif", f"wall_gap_lib_{args.gap_size}.gif")
         label_p = f"PUCT  frac={fracs_p[-1]:.2f}"
         label_g = f"Gumbel  frac={fracs_g[-1]:.2f}"
         make_gif(frames_p, frames_g, label_p, label_g, gif_path, fps=15)

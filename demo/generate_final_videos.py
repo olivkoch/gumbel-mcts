@@ -70,7 +70,7 @@ def execute_and_record(rec_env, action, record_every=3):
 
 
 def to_mp4(gif_path):
-    mp4 = gif_path.replace(".gif", ".mp4")
+    mp4 = gif_path.replace("/gif/", "/mp4/").replace(".gif", ".mp4")
     try:
         subprocess.run([
             "ffmpeg", "-y", "-i", gif_path,
@@ -170,7 +170,7 @@ def generate_pusht_videos(policy):
             all_covs[algo_name] = cov
             rec.close()
 
-        gif = os.path.join(OUT_DIR, f"final_pusht_sims{budget}.gif")
+        gif = os.path.join(OUT_DIR, "gif", f"final_pusht_sims{budget}.gif")
         make_gif(all_frames["puct"], all_frames["gumbel"],
                  f"PUCT  IoU={all_covs['puct']:.2f}",
                  f"Gumbel  IoU={all_covs['gumbel']:.2f}",
@@ -313,7 +313,7 @@ def generate_wallgap_videos(policy):
                 all_fracs[algo_name] = frac
                 rec.close()
 
-            gif = os.path.join(OUT_DIR, f"final_wallgap{gap_size}_sims{budget}.gif")
+            gif = os.path.join(OUT_DIR, "gif", f"final_wallgap{gap_size}_sims{budget}.gif")
             make_gif(all_frames["puct"], all_frames["gumbel"],
                      f"PUCT  frac={all_fracs['puct']:.2f}",
                      f"Gumbel  frac={all_fracs['gumbel']:.2f}",
@@ -327,7 +327,7 @@ if __name__ == "__main__":
     generate_pusht_videos(policy)
     generate_wallgap_videos(policy)
     print(f"\nAll videos generated in {time.time()-t0:.0f}s")
-    for f in sorted(os.listdir(OUT_DIR)):
-        if f.startswith("final_") and f.endswith(".mp4"):
-            size = os.path.getsize(os.path.join(OUT_DIR, f)) / 1024
+    for f in sorted(os.listdir(os.path.join(OUT_DIR, "mp4"))):
+        if f.endswith(".mp4"):
+            size = os.path.getsize(os.path.join(OUT_DIR, "mp4", f)) / 1024
             print(f"  {f}  ({size:.0f} KB)")

@@ -643,7 +643,7 @@ def main():
     ap.add_argument("--seed",                 type=int,   default=42)
     ap.add_argument("--minimax-depth",        type=int,   default=2)
     ap.add_argument("--minimax-eps",          type=float, default=0.3)
-    ap.add_argument("--out",                  type=str,   default="demo/connect4_train_curves.png")
+    ap.add_argument("--out",                  type=str,   default="demo/png/connect4_train_curves.png")
     ap.add_argument("--max-nodes",            type=int,   default=500)
     ap.add_argument("--max-considered-actions", type=int, default=7)
     ap.add_argument("--entropy-min-k",        type=int,   default=7)

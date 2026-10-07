@@ -698,7 +698,7 @@ def main():
     ap.add_argument("--entropy-min-k", type=int, default=4,
                     help="min candidates used when model is fully random (default 4); "
                          "entropy scheduler interpolates between this and --max-considered-actions")
-    ap.add_argument("--out",          type=str,   default="demo/gomoku_train_curves.png")
+    ap.add_argument("--out",          type=str,   default="demo/png/gomoku_train_curves.png")
     args = ap.parse_args()
 
     sim_budgets = [int(x) for x in args.sim_budgets.split(",")]

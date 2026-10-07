@@ -204,7 +204,7 @@ if __name__ == "__main__":
     frames_p, frac_p = record_episode("puct", best_seed, policy)
     frames_g, frac_g = record_episode("gumbel", best_seed, policy)
 
-    gif_path = os.path.join(OUT_DIR, f"final_wallgap_sims{BUDGET}.gif")
+    gif_path = os.path.join(OUT_DIR, "gif", f"final_wallgap_sims{BUDGET}.gif")
     make_gif(frames_p, frames_g,
              f"PUCT  frac={frac_p:.2f}",
              f"Gumbel  frac={frac_g:.2f}",

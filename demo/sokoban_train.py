@@ -901,7 +901,7 @@ def main():
                     help="min cumulative wins before value head trains")
     ap.add_argument("--seed",              type=int, default=0)
     ap.add_argument("--out",               type=str,
-                    default="demo/sokoban_train_plot.png")
+                    default="demo/png/sokoban_train_plot.png")
     args = ap.parse_args()
 
     print("Sokoban — Gumbel vs PUCT self-play learning curves")

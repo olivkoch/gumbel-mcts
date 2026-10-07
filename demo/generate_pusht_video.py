@@ -148,7 +148,7 @@ if __name__ == "__main__":
     frames_p, iou_p = record_episode("puct", best_seed, policy)
     frames_g, iou_g = record_episode("gumbel", best_seed, policy)
 
-    gif_path = os.path.join(OUT_DIR, "final_pusht_sims64.gif")
+    gif_path = os.path.join(OUT_DIR, "gif", "final_pusht_sims64.gif")
     make_gif(frames_p, frames_g,
              f"PUCT  IoU={iou_p:.2f}",
              f"Gumbel  IoU={iou_g:.2f}",

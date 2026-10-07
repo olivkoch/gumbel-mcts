@@ -473,7 +473,7 @@ def generate_heatmap_9x9(num_sims=512, seed=42, out_path=None,
 
 
 
-    out = out_path or "demo/gomoku_heatmap_9x9.png"
+    out = out_path or "demo/png/gomoku_heatmap_9x9.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"\nSaved heatmap → {out}")

@@ -575,8 +575,8 @@ def main():
     ap.add_argument("--budgets",     type=str, default="4,8,16,32,64,128,256,512,1024")
     ap.add_argument("--budget-anim", type=int, default=None,
                     help="Budget for animation (default: middle of --budgets)")
-    ap.add_argument("--out-plot", type=str, default="demo/sokoban_plot.png")
-    ap.add_argument("--out-anim", type=str, default="demo/sokoban_anim.gif")
+    ap.add_argument("--out-plot", type=str, default="demo/png/sokoban_plot.png")
+    ap.add_argument("--out-anim", type=str, default="demo/gif/sokoban_anim.gif")
     args = ap.parse_args()
 
     budgets     = [int(x) for x in args.budgets.split(",")]

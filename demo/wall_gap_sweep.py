@@ -102,7 +102,7 @@ def main():
                   f"success={r['gumbel_success']:.1%}")
 
     # Save results
-    out_path = os.path.join(args.results_dir, "wall_gap_sweep_results.json")
+    out_path = os.path.join(args.results_dir, "json", "wall_gap_sweep_results.json")
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\nResults saved to {out_path}")

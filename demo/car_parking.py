@@ -489,9 +489,9 @@ def main():
     ap.add_argument("--budget-anim", type=int, default=None,
                     help="Budget used for the trajectory animation (default: second-smallest in --budgets)")
     ap.add_argument("--out-plot",    type=str,
-                    default="demo/car_parking_plot.png")
+                    default="demo/png/car_parking_plot.png")
     ap.add_argument("--out-anim",    type=str,
-                    default="demo/car_parking_anim.gif")
+                    default="demo/gif/car_parking_anim.gif")
     ap.add_argument("--fair", action="store_true",
                     help="Use fixed seed for animation instead of cherry-picking")
     args = ap.parse_args()

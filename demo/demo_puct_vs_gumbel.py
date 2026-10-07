@@ -326,7 +326,7 @@ def main():
         model_label = "Random Model"
         model = RandomModel()
 
-    out_path = args.out or f"demo/puct_vs_gumbel_winrate_{args.model}.png"
+    out_path = args.out or f"demo/png/puct_vs_gumbel_winrate_{args.model}.png"
 
     print(f"PUCT vs Gumbel Dense — 15×15 Gomoku, {model_label}")
     print(f"Budgets: {budgets}")

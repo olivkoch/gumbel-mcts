@@ -144,7 +144,7 @@ def main():
     print(f"{'='*60}\n")
 
     if record:
-        gif_path = os.path.join(out_dir, "pusht_lib_comparison.gif")
+        gif_path = os.path.join(out_dir, "gif", "pusht_lib_comparison.gif")
         label_p = f"PUCT  IoU={covs_p[-1]:.2f}"
         label_g = f"Gumbel  IoU={covs_g[-1]:.2f}"
         make_gif(frames_p, frames_g, label_p, label_g, gif_path, fps=15)

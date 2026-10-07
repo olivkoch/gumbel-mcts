@@ -65,7 +65,7 @@ def run_sweep(budgets, seeds, n_macros, policy, out_dir, rollout_depth=1):
         }
 
         if gif_frames_puct and gif_frames_gumbel:
-            gif_path = os.path.join(out_dir, f"pusht_budget{budget}.gif")
+            gif_path = os.path.join(out_dir, "gif", f"pusht_budget{budget}.gif")
             make_gif(
                 gif_frames_puct, gif_frames_gumbel,
                 f"PUCT (n={budget})", f"Gumbel (n={budget})",
