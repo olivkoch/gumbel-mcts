@@ -328,10 +328,8 @@ def run_episode(algo, num_sims, logic, model):
         else:
             tree = GumbelDense(n_games=1, max_nodes=max_nodes, logic=logic, device="cpu")
             tree.initialize_roots([0], board[None], np.array([1]))
-            tree.run_simulation_batch(model, [0], num_simulations=num_sims)
-            visits, _ = tree.get_all_root_data(n_active=1)
-            v = visits[0].astype(np.float64)
-            action = int(np.random.choice(len(v), p=v / v.sum()))
+            actions = tree.run_simulation_batch(model, [0], num_simulations=num_sims)
+            action = int(actions[0])
 
         _, _, done, board = logic.fast_step(board, action, 1)
         traj.append(board.copy())
@@ -572,7 +570,7 @@ def main():
     )
     ap.add_argument("--episodes",    type=int, default=40)
     ap.add_argument("--seed",        type=int, default=0)
-    ap.add_argument("--budgets",     type=str, default="4,8,16,32,64,128,256,512,1024")
+    ap.add_argument("--budgets",     type=str, default="4,8,16,32,64,128,256")
     ap.add_argument("--budget-anim", type=int, default=None,
                     help="Budget for animation (default: middle of --budgets)")
     ap.add_argument("--out-plot", type=str, default="demo/png/sokoban_plot.png")

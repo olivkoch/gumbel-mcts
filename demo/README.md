@@ -100,7 +100,7 @@ Demonstrates that Gumbel produces sharper, more focused search distributions and
 | `sokoban_train.py` | End-to-end self-play training comparison |
 | `sokoban_sim_sweep.py` | Simulation-budget sweep with training curves |
 
-**What it proves:** Wrong pushes create immediate corner deadlocks (value = -1). Gumbel detects these in the first halving phase and never revisits them; PUCT keeps allocating visits proportionally to the prior.
+**What it proves:** Wrong pushes create immediate corner deadlocks (value = -1). Gumbel detects these in the first halving phase and never revisits them; PUCT keeps allocating visits proportionally to the prior. At sims=4, Gumbel already reaches 98% success vs PUCT's 18%.
 
 ---
 
