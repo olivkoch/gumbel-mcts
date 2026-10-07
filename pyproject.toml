@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gumbel-mcts"
-version = "0.1.1"
+version = "0.2.0"
 readme = "README.md"
 description = "A lightweight, standalone, and modular Gumbel MCTS implementation"
 license = "MIT"
@@ -19,10 +19,17 @@ dependencies = [
     "matplotlib>=3.10.8",
     "pillow>=12.1.1",
     "wandb>=0.30.0",
+    "gymnasium>=1.4.0",
+    "gym-pusht>=0.1.6",
+    "pymunk<7",
 ]
 
 [project.optional-dependencies]
 test = ["pytest", "pytest-cov"]
+
+[[tool.uv.index]]
+url = "https://socket-registry.mistralai.com/pypi/simple/"
+default = true
 
 [project.urls]
 Homepage = "https://github.com/olivkoch/gumbel-mcts"
