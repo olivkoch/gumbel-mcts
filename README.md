@@ -16,6 +16,43 @@ Optimized for speed! Generates hundreds of thousands of sims / sec. :rocket:
   <small><i><a href="https://medium.com/correll-lab/planning-with-gumbel-036018b180bf">Improving MuZero using the Gumbel top-k trick</a>, by Xavier O'Keefe</i></small>
 </p>
 
+## Demos
+
+PUCT (left) vs Gumbel (right) on four tasks — same simulation budget, same model. Click any thumbnail to watch the full video.
+
+<table>
+<tr>
+<td align="center" width="50%">
+<b>PushT</b> — uniform prior, 64 sims<br>
+<a href="https://github.com/olivkoch/gumbel-mcts/blob/main/demo/mp4/final_pusht_uni_sims64.mp4">
+<img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/demo/gif/final_pusht_uni_sims64.gif" width="100%" alt="PushT: PUCT IoU=0.03 vs Gumbel IoU=0.85" />
+</a>
+</td>
+<td align="center" width="50%">
+<b>Wall-gap PushT</b> — push through a narrow gap<br>
+<a href="https://github.com/olivkoch/gumbel-mcts/blob/main/demo/mp4/final_wallgap.mp4">
+<img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/demo/gif/final_wallgap.gif" width="100%" alt="Wall-gap: PUCT frac=0.00 vs Gumbel frac=0.75" />
+</a>
+</td>
+</tr>
+<tr>
+<td align="center">
+<b>Robot arm</b> — 4 joints, 2 obstacles, 64 sims<br>
+<a href="https://github.com/olivkoch/gumbel-mcts/blob/main/demo/mp4/final_robot_arm.mp4">
+<img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/demo/gif/final_robot_arm.gif" width="100%" alt="Robot arm: PUCT dist=306 vs Gumbel dist=3" />
+</a>
+</td>
+<td align="center">
+<b>Sokoban</b> — 2-box puzzle, 32 sims<br>
+<a href="https://github.com/olivkoch/gumbel-mcts/blob/main/demo/mp4/sokoban_anim.mp4">
+<img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/demo/gif/sokoban_anim.gif" width="100%" alt="Sokoban: PUCT fails vs Gumbel solves" />
+</a>
+</td>
+</tr>
+</table>
+
+> See [`demo/`](demo/) for all scripts, sweep results, and reproduction instructions.
+
 ## Description
 
 Gumbel sampling brought tremendous progress to MCTS, but efficient standalone implementation of Gumbel MCTS are missing.
