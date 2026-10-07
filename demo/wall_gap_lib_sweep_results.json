@@ -1,0 +1,12 @@
+{
+  "100": {
+    "256": {
+      "puct_mean": 0.00125,
+      "puct_std": 0.01763341997458236,
+      "puct_success": 0.0,
+      "gumbel_mean": 0.258125,
+      "gumbel_std": 0.151078156511787,
+      "gumbel_success": 0.0
+    }
+  }
+}

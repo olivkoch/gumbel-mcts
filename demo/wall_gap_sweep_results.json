@@ -1,0 +1,176 @@
+{
+  "200": {
+    "4": {
+      "puct_mean": 0.2708333333333333,
+      "puct_std": 0.30970976556913554,
+      "puct_success": 0.43333333333333335,
+      "gumbel_mean": 0.36666666666666664,
+      "gumbel_std": 0.3991310004942682,
+      "gumbel_success": 0.4666666666666667
+    },
+    "8": {
+      "puct_mean": 0.625,
+      "puct_std": 0.0,
+      "puct_success": 1.0,
+      "gumbel_mean": 0.42916666666666664,
+      "gumbel_std": 0.36038655943614517,
+      "gumbel_success": 0.6
+    },
+    "16": {
+      "puct_mean": 0.625,
+      "puct_std": 0.0,
+      "puct_success": 1.0,
+      "gumbel_mean": 0.3958333333333333,
+      "gumbel_std": 0.37925823070245357,
+      "gumbel_success": 0.5333333333333333
+    },
+    "32": {
+      "puct_mean": 0.6375,
+      "puct_std": 0.0375,
+      "puct_success": 1.0,
+      "gumbel_mean": 0.37916666666666665,
+      "gumbel_std": 0.36154087674225105,
+      "gumbel_success": 0.5333333333333333
+    },
+    "64": {
+      "puct_mean": 0.7083333333333334,
+      "puct_std": 0.05892556509887896,
+      "puct_success": 1.0,
+      "gumbel_mean": 0.38333333333333336,
+      "gumbel_std": 0.3636237371545238,
+      "gumbel_success": 0.5333333333333333
+    },
+    "128": {
+      "puct_mean": 0.75,
+      "puct_std": 0.0,
+      "puct_success": 1.0,
+      "gumbel_mean": 0.36666666666666664,
+      "gumbel_std": 0.37211855936276844,
+      "gumbel_success": 0.5
+    },
+    "256": {
+      "puct_mean": 0.75,
+      "puct_std": 0.0,
+      "puct_success": 1.0,
+      "gumbel_mean": 0.4125,
+      "gumbel_std": 0.36536226314896464,
+      "gumbel_success": 0.5666666666666667
+    }
+  },
+  "150": {
+    "4": {
+      "puct_mean": 0.37916666666666665,
+      "puct_std": 0.4335936717967897,
+      "puct_success": 0.43333333333333335,
+      "gumbel_mean": 0.2,
+      "gumbel_std": 0.33478849044334447,
+      "gumbel_success": 0.26666666666666666
+    },
+    "8": {
+      "puct_mean": 0.6625,
+      "puct_std": 0.16185770499629196,
+      "puct_success": 0.9666666666666667,
+      "gumbel_mean": 0.24166666666666667,
+      "gumbel_std": 0.3210226714043037,
+      "gumbel_success": 0.3
+    },
+    "16": {
+      "puct_mean": 0.75,
+      "puct_std": 0.125,
+      "puct_success": 1.0,
+      "gumbel_mean": 0.275,
+      "gumbel_std": 0.3657184709581949,
+      "gumbel_success": 0.36666666666666664
+    },
+    "32": {
+      "puct_mean": 0.6958333333333333,
+      "puct_std": 0.0619419531138271,
+      "puct_success": 1.0,
+      "gumbel_mean": 0.26666666666666666,
+      "gumbel_std": 0.3472111109333276,
+      "gumbel_success": 0.3333333333333333
+    },
+    "64": {
+      "puct_mean": 0.8583333333333333,
+      "puct_std": 0.04249182927993988,
+      "puct_success": 1.0,
+      "gumbel_mean": 0.24583333333333332,
+      "gumbel_std": 0.3361598908588326,
+      "gumbel_success": 0.3333333333333333
+    },
+    "128": {
+      "puct_mean": 0.8583333333333333,
+      "puct_std": 0.04249182927993988,
+      "puct_success": 1.0,
+      "gumbel_mean": 0.3416666666666667,
+      "gumbel_std": 0.3621885635350121,
+      "gumbel_success": 0.43333333333333335
+    },
+    "256": {
+      "puct_mean": 0.8708333333333333,
+      "puct_std": 0.02243818669639376,
+      "puct_success": 1.0,
+      "gumbel_mean": 0.26666666666666666,
+      "gumbel_std": 0.3647678104706548,
+      "gumbel_success": 0.3333333333333333
+    }
+  },
+  "100": {
+    "4": {
+      "puct_mean": 0.0,
+      "puct_std": 0.0,
+      "puct_success": 0.0,
+      "gumbel_mean": 0.0,
+      "gumbel_std": 0.0,
+      "gumbel_success": 0.0
+    },
+    "8": {
+      "puct_mean": 0.375,
+      "puct_std": 0.0,
+      "puct_success": 0.0,
+      "gumbel_mean": 0.041666666666666664,
+      "gumbel_std": 0.10865337342004414,
+      "gumbel_success": 0.0
+    },
+    "16": {
+      "puct_mean": 0.3625,
+      "puct_std": 0.0673145600891813,
+      "puct_success": 0.0,
+      "gumbel_mean": 0.0125,
+      "gumbel_std": 0.0673145600891813,
+      "gumbel_success": 0.0
+    },
+    "32": {
+      "puct_mean": 0.375,
+      "puct_std": 0.0,
+      "puct_success": 0.0,
+      "gumbel_mean": 0.004166666666666667,
+      "gumbel_std": 0.02243818669639376,
+      "gumbel_success": 0.0
+    },
+    "64": {
+      "puct_mean": 0.38333333333333336,
+      "puct_std": 0.04487637339278753,
+      "puct_success": 0.1,
+      "gumbel_mean": 0.0125,
+      "gumbel_std": 0.049476425362657984,
+      "gumbel_success": 0.0
+    },
+    "128": {
+      "puct_mean": 0.37083333333333335,
+      "puct_std": 0.03930825471690252,
+      "puct_success": 0.03333333333333333,
+      "gumbel_mean": 0.029166666666666667,
+      "gumbel_std": 0.0834374349770866,
+      "gumbel_success": 0.0
+    },
+    "256": {
+      "puct_mean": 0.4041666666666667,
+      "puct_std": 0.0619419531138271,
+      "puct_success": 0.26666666666666666,
+      "gumbel_mean": 0.020833333333333332,
+      "gumbel_std": 0.07276770498572079,
+      "gumbel_success": 0.0
+    }
+  }
+}
