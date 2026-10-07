@@ -7,18 +7,9 @@
 
 # gumbel-mcts
 
-A lightweight and numba-accelerated Gumbel MCTS implementation. 
+An implementation of [Policy improvement by planning with Gumbel](https://openreview.net/forum?id=bERaNdoegnO) (Danihelka et al., ICLR 2022). Numba-accelerated, hundreds of thousands of simulations per second.
 
-Optimized for speed! Generates hundreds of thousands of sims / sec. :rocket:
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/img/gumbel.png" width="100%" alt="Gumbel principle" /><br>
-  <small><i><a href="https://medium.com/correll-lab/planning-with-gumbel-036018b180bf">Improving MuZero using the Gumbel top-k trick</a>, by Xavier O'Keefe</i></small>
-</p>
-
-## Demos
-
-PUCT (left) vs Gumbel (right) on four tasks — same simulation budget, same model. Click any thumbnail to watch the full video.
+Gumbel MCTS replaces PUCT's UCB-based action selection with sequential halving over Gumbel-perturbed log-priors. This produces better actions under the same simulation budget — especially at low budgets, where PUCT wastes visits on bad branches it can't prune.
 
 <table>
 <tr>
@@ -51,62 +42,64 @@ PUCT (left) vs Gumbel (right) on four tasks — same simulation budget, same mod
 </tr>
 </table>
 
-> See [`demo/`](demo/) for all scripts, sweep results, and reproduction instructions.
+<p align="center"><i>PUCT (left) vs Gumbel (right), same budget, same model. Click to play.</i></p>
 
-## Description
+> All demos are fully reproducible — see [`demo/`](demo/) for scripts, sweep results, and instructions.
 
-Gumbel sampling brought tremendous progress to MCTS, but efficient standalone implementation of Gumbel MCTS are missing.
+## What's included
 
-We provide three MCTS implementations:
+Three MCTS implementations sharing the same tree storage and batch interface:
 
-- `puct.py`: an efficient implementation of PUCT MCTS. It produces the exact same output as a reference [mcts_v2.py](https://github.com/michaelnny/alpha_zero/blob/main/alpha_zero/core/mcts_v2.py) but but with a **2-20X speedup** on both Mac and NVIDIA GPUs. 
+| Algorithm | File | Best for |
+|-----------|------|----------|
+| **PUCT** | `puct.py` | Standard UCB-based MCTS. 2-20x faster than [reference](https://github.com/michaelnny/alpha_zero/blob/main/alpha_zero/core/mcts_v2.py) on CPU and GPU. |
+| **Gumbel Dense** | `gumbel_dense.py` | Low-budget planning. Sequential halving over all legal actions. |
+| **Gumbel Sparse** | `gumbel_sparse.py` | Large action spaces (e.g. chess). Samples a subset of actions to consider. |
 
-- `gumbel_dense.py`: an implementation of [Policy improvement by planning with Gumbel](https://openreview.net/forum?id=bERaNdoegnO), offering **massive learning efficiency when the simulation budget is low**
+See [gumbel-mcts-benchmark](https://github.com/olivkoch/gumbel-mcts-benchmark) for validation against a gold-standard MCTS.
 
-- `gumbel_sparse.py`: a sparse implementation of Gumbel MCTS, particularly useful for games with large action spaces (e.g. chess)
+## Installation
 
-Our Gumbel implementation offers **both simulation efficiency and speed**.
-
-See [gumbel-mcts-benchmark](https://github.com/olivkoch/gumbel-mcts-benchmark) for full benchmark and validation against a gold standard MCTS.
-
-## Usage
-
-```python
-
-def play_game():
-    logic = TicTacToeLogic()
-    model = TinyModel()
-    model.eval()
-
-    board = np.zeros((3, 3), dtype=np.int8)
-    player = 1
-    symbols = {0: ".", 1: "X", 2: "O"}
-
-    while True:
-        tree = GumbelSparse(n_games=1, max_nodes=500, device="cpu", logic=logic)
-        tree.initialize_roots([0], board.ravel()[None], np.array([player]))
-        move = tree.run_simulation_batch(model, [0], num_simulations=50)
-        action = move[0]
-
-        _, winner, done, board = logic.fast_step(board, action, player)
+```bash
+pip install gumbel-mcts
 ```
 
-## Illustration
+## Quick start
 
-With a random model, Gumbel wins with low-budget but PUCT catches up. As soon as the model gets better than random, Gumbel wins.
+```python
+from gumbel_mcts import GumbelDense
+
+tree = GumbelDense(n_games=1, max_nodes=500, logic=logic, device="cpu")
+tree.initialize_roots([0], board[None], np.array([player]))
+action = tree.run_simulation_batch(model, [0], num_simulations=64)[0]
+```
+
+The interface is the same for all three algorithms — swap `GumbelDense` for `PUCT` or `GumbelSparse`.
+
+## How it works
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/img/puct_vs_gumbel_winrate_random.png" width="100%" alt="PUCT vs Gumbel" />
+  <img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/img/gumbel.png" width="100%" alt="Gumbel sequential halving" /><br>
+  <small><i><a href="https://medium.com/correll-lab/planning-with-gumbel-036018b180bf">Improving MuZero using the Gumbel top-k trick</a>, by Xavier O'Keefe</i></small>
+</p>
+
+Standard PUCT explores actions proportionally to a UCB score that mixes prior probability and visit-based value estimates. When the budget is small, most actions get only a few visits, and the value estimates are noisy — PUCT can't reliably distinguish good actions from bad ones.
+
+Gumbel MCTS takes a different approach: add Gumbel noise to the log-prior to create an initial ranking, then use sequential halving to eliminate half the candidates at each phase. Each phase allocates equal simulations to the surviving candidates. The result is that the budget concentrates on a shrinking set of promising actions, producing a much sharper signal with the same total simulation count.
+
+## Board game results
+
+Head-to-head on 15x15 Gomoku across simulation budgets. Gumbel's advantage is largest at low budgets and persists as the model improves:
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/img/puct_vs_gumbel_winrate_random.png" width="100%" alt="PUCT vs Gumbel — random model" />
 </p>
 <p align="center">
-  <img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/img/puct_vs_gumbel_winrate_heuristic.png" width="100%" alt="PUCT vs Gumbel" />
-</p>
-<p align="center">
-  <img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/img/puct_vs_gumbel_winrate_strong.png" width="100%" alt="PUCT vs Gumbel" />
+  <img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/img/puct_vs_gumbel_winrate_heuristic.png" width="100%" alt="PUCT vs Gumbel — heuristic model" />
 </p>
 
-Gumbel MCTS makes much better use of its simulation budget. With 8 sims on Gomoku, Gumbel finds the strategic moves while PUCT concentrates its visit counts at the wrong place.
+With 8 simulations on 9x9 Gomoku, Gumbel concentrates visits on the strategic moves while PUCT spreads them across irrelevant squares:
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/img/gomoku_heatmap_9x9.png" width="100%" alt="Gomoku Heatmap 9x9 — PUCT vs Gumbel Dense" />
+  <img src="https://raw.githubusercontent.com/olivkoch/gumbel-mcts/main/img/gomoku_heatmap_9x9.png" width="100%" alt="Visit distribution heatmap — PUCT vs Gumbel Dense" />
 </p>
